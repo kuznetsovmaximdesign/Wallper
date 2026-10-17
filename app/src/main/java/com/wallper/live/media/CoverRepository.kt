@@ -9,6 +9,7 @@ import com.wallper.live.core.Footage
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
@@ -39,7 +40,10 @@ class CoverRepository(
             // The 4K master gives the sharpest frame; the 1080p stream is the fallback.
             listOfNotNull(footage.masterUrl, footage.previewUrl).distinct().firstNotNullOfOrNull { url ->
                 runCatching { render(footage, url) }
-                    .onFailure { Log.w(TAG, "cover of ${footage.id} failed", it) }
+                    .onFailure {
+                        if (it is CancellationException) throw it
+                        Log.w(TAG, "cover of ${footage.id} failed", it)
+                    }
                     .getOrNull()
             }
         }

@@ -325,6 +325,8 @@ private fun FootageCard(
         if (hero) {
             // Full-width card: a 2560 px frame of the master, the live stream plays over it.
             if (covers.cached(footage) == null) covers.cover(footage)?.let { cover = it }
+            // Its live loop is not shown here, but lets the viewer move the instant it opens.
+            motion.get(footage.id, footage.previewUrl ?: footage.masterUrl)
         } else if (loop == null) {
             val made = motion.get(footage.id, footage.previewUrl ?: footage.masterUrl)
             if (made != null) {

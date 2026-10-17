@@ -409,6 +409,19 @@ private fun VideoPage(
     onFocus: ((Focus) -> Unit)?,
 ) {
     var picture by remember(spec != null) { mutableStateOf(false) }
+    // Until the video has a picture, background thumbnail cutting steps aside for it.
+    val context = LocalContext.current
+    val motionThumbs = remember(context) { (context.applicationContext as WallperApplication).container.motionThumbs }
+    val starting = spec != null && !picture
+    LaunchedEffect(starting) {
+        if (!starting) return@LaunchedEffect
+        motionThumbs.hold()
+        try {
+            delay(START_HOLD_MS)
+        } finally {
+            motionThumbs.release()
+        }
+    }
     val covered = spec == null || !picture
     val coverAlpha by animateFloatAsState(
         targetValue = if (covered) 1f else 0f,
@@ -631,4 +644,5 @@ private var swipeHintShown = false
 // endregion
 
 private const val COVER_FADE_MS = 320
+private const val START_HOLD_MS = 8_000L
 private const val PORTRAIT_LIMIT = 0.8f

@@ -75,18 +75,22 @@ class AppRobot {
         return device.findObjects(By.res(tag)).maxByOrNull { it.visibleBounds.width() * it.visibleBounds.height() } ?: find(tag)
     }
 
-    /** Taps the element showing [text], waiting for it like [find]. */
+    /**
+     * Taps the element whose text starts with [text], waiting for it like [find]. A row
+     * merges its title and hint into one text, so only the start is matched.
+     */
     fun tapText(text: String) {
         val deadline = SystemClock.elapsedRealtime() + UI_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
-            device.findObject(By.text(text))?.let {
+            device.findObject(By.textStartsWith(text))?.let {
                 it.click()
                 SystemClock.sleep(SETTLE_MS)
                 return
             }
             SystemClock.sleep(250)
         }
-        fail("No '$text' on screen (in front: ${device.currentPackageName})")
+        val visibleText = device.findObjects(By.textStartsWith("")).mapNotNull { it.text }.take(12)
+        fail("No '$text' on screen (in front: ${device.currentPackageName}, text: $visibleText)")
     }
 
     fun string(id: Int): String = instrumentation.targetContext.getString(id)

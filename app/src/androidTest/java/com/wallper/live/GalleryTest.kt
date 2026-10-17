@@ -91,7 +91,7 @@ class GalleryTest {
 
     companion object {
         const val START_TIMEOUT_MS = 20_000L
-        const val THUMB_TIMEOUT_MS = 90_000L
+        const val THUMB_TIMEOUT_MS = 180_000L // software codecs on the emulator take over a minute
         const val INSTALL_TIMEOUT_MS = 60_000L
     }
 }

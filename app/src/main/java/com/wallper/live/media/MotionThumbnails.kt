@@ -20,6 +20,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Process
 import android.util.Log
 import android.view.Surface
 import java.io.File
@@ -28,6 +29,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -47,8 +49,26 @@ class MotionThumbnails(
     private val remote: RemoteFiles,
     private val directory: File,
 ) {
-    private val dispatcher = Executors.newFixedThreadPool(PARALLEL) { Thread(it, "motion-thumbs") }.asCoroutineDispatcher()
+    private val dispatcher = Executors.newFixedThreadPool(PARALLEL) { task ->
+        Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+            task.run()
+        }, "motion-thumbs")
+    }.asCoroutineDispatcher()
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File?>>()
+    private val holds = AtomicInteger()
+
+    /**
+     * While held (a viewer is starting its video), cutting pauses between frames so the
+     * codecs and CPU go to the wallpaper the person just opened.
+     */
+    fun hold() {
+        holds.incrementAndGet()
+    }
+
+    fun release() {
+        holds.updateAndGet { (it - 1).coerceAtLeast(0) }
+    }
 
     fun cached(id: String): File? = fileOf(id).takeIf { it.exists() && it.length() > 0 }
 
@@ -147,10 +167,16 @@ class MotionThumbnails(
             var decoderDone = false
             var encoderDone = false
             var frames = 0
-            val deadline = System.nanoTime() + TIMEOUT_NANOS
+            var lastRenderedUs = -FRAME_US
+            // Slow devices are allowed to take their time; only a pipeline that stops moving fails.
+            var lastProgress = System.nanoTime()
 
             while (!encoderDone) {
-                check(System.nanoTime() < deadline) { "Motion thumbnail timed out" }
+                while (holds.get() > 0) {
+                    Thread.sleep(HOLD_POLL_MS)
+                    lastProgress = System.nanoTime()
+                }
+                check(System.nanoTime() - lastProgress < STALL_NANOS) { "Motion thumbnail stalled" }
                 if (!inputDone) {
                     val index = dec.dequeueInputBuffer(TICK_US)
                     if (index >= 0) {
@@ -178,15 +204,19 @@ class MotionThumbnails(
                 if (!decoderDone) {
                     val index = dec.dequeueOutputBuffer(info, TICK_US)
                     if (index >= 0) {
+                        lastProgress = System.nanoTime()
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
                             dec.releaseOutputBuffer(index, false)
                             enc.signalEndOfInputStream()
                             decoderDone = true
                         } else {
                             val time = info.presentationTimeUs
-                            val render = time >= startUs && time <= endUs
+                            // Sources above the loop's frame rate (60 fps, layer-dropped HFR) are
+                            // decimated: drawing and encoding pictures that get dropped is waste.
+                            val render = time >= startUs && time <= endUs && time - lastRenderedUs >= FRAME_US * 9 / 10
                             dec.releaseOutputBuffer(index, render)
                             if (render) {
+                                lastRenderedUs = time
                                 synchronized(frameLock) {
                                     val waitUntil = System.currentTimeMillis() + FRAME_WAIT_MS
                                     while (!frameReady) {
@@ -225,6 +255,7 @@ class MotionThumbnails(
                         continue
                     }
                     if (index < 0) break
+                    lastProgress = System.nanoTime()
                     val data = enc.getOutputBuffer(index)!!
                     if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
                     if (info.size > 0 && muxTrack >= 0) mux.writeSampleData(muxTrack, data, info)
@@ -270,7 +301,9 @@ class MotionThumbnails(
         const val FADE_US = 500_000L
         const val TICK_US = 10_000L
         const val FRAME_WAIT_MS = 2_500L
-        const val TIMEOUT_NANOS = 90_000_000_000L
+        const val FRAME_US = 1_000_000L / FPS
+        const val STALL_NANOS = 20_000_000_000L
+        const val HOLD_POLL_MS = 50L
     }
 }
 
