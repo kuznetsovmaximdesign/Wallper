@@ -422,6 +422,8 @@ private fun VideoPage(
             .focusDrag(focus, onFocus)
             .testTag(TestTags.VIDEO),
     ) {
+        // The 9:16 loop only matches portrait screens; wide ones keep the still.
+        val portrait = maxWidth < maxHeight * PORTRAIT_LIMIT
         if (spec != null) {
             LoopVideo(
                 spec = spec,
@@ -436,8 +438,7 @@ private fun VideoPage(
         if (coverAlpha > 0f) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = coverAlpha }) {
                 if (still != null) Still(still, focus)
-                // The 9:16 loop only matches portrait screens; wide ones keep the still.
-                if (loop != null && maxWidth < maxHeight * PORTRAIT_LIMIT) {
+                if (loop != null && portrait) {
                     InlineVideo(LoopSpec(Uri.fromFile(loop), loopMs = 0, fadeMs = 0))
                 }
                 if (spec != null && loop == null) {
