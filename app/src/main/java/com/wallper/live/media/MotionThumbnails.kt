@@ -21,6 +21,7 @@ import android.opengl.GLES30
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import java.io.File
@@ -57,6 +58,7 @@ class MotionThumbnails(
     }.asCoroutineDispatcher()
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File?>>()
     private val holds = AtomicInteger()
+    private val failedAt = ConcurrentHashMap<String, Long>()
 
     /**
      * While held (a viewer is starting its video), cutting pauses between frames so the
@@ -78,6 +80,9 @@ class MotionThumbnails(
     /** Returns the cached loop for [id], generating it from [uri] if needed. */
     suspend fun get(id: String, uri: String): File? {
         cached(id)?.let { return it }
+        // A loop that just failed is not cut again on every scroll: that would keep the
+        // codecs busy for nothing (the still is shown meanwhile).
+        failedAt[id]?.let { if (SystemClock.elapsedRealtime() - it < RETRY_AFTER_MS) return null }
         val deferred = CompletableDeferred<File?>()
         val existing = inFlight.putIfAbsent(id, deferred)
         if (existing != null) return existing.await()
@@ -86,7 +91,10 @@ class MotionThumbnails(
                 val began = System.nanoTime()
                 runCatching { generate(uri, fileOf(id), posterOf(id)) }
                     .onSuccess { Log.i(TAG, "$id ready in ${(System.nanoTime() - began) / 1_000_000}ms") }
-                    .onFailure { Log.w(TAG, "$id failed", it) }
+                    .onFailure {
+                        failedAt[id] = SystemClock.elapsedRealtime()
+                        Log.w(TAG, "$id failed", it)
+                    }
                     .getOrNull()
             }
             deferred.complete(result)
@@ -304,6 +312,7 @@ class MotionThumbnails(
         const val FRAME_US = 1_000_000L / FPS
         const val STALL_NANOS = 20_000_000_000L
         const val HOLD_POLL_MS = 50L
+        const val RETRY_AFTER_MS = 3 * 60_000L
     }
 }
 
