@@ -142,7 +142,7 @@ jobs:
 
       - name: Test timings
         if: always()
-        run: $ANDROID_HOME/platform-tools/adb logcat -d -s WallperScreen:I WallperTest:I | tail -60 || true
+        run: timeout 20 $ANDROID_HOME/platform-tools/adb logcat -d -s WallperScreen:I WallperTest:I | tail -60 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
