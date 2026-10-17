@@ -11,12 +11,19 @@ object Playback {
     /** Length of the cross-fade that hides the loop seam. */
     const val FADE_MS = 1_500L
 
-    const val MIN_SPEED = 0.25f
-    const val MAX_SPEED = 2f
+    /** Speeds go from 0.5× to 4× in half steps: few, clearly different stops. */
+    const val MIN_SPEED = 0.5f
+    const val MAX_SPEED = 4f
+    const val SPEED_STEP = 0.5f
     const val DEFAULT_SPEED = 1f
-    val SPEED_PRESETS = listOf(0.5f, 1f, 1.5f, 2f)
+
+    /** Stops between the ends of the speed slider (Slider's `steps`). */
+    val SPEED_STOPS: Int = ((MAX_SPEED - MIN_SPEED) / SPEED_STEP).toInt() - 1
 
     fun clampSpeed(speed: Float): Float = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+
+    /** The nearest allowed speed: a half step between 0.5× and 4×. */
+    fun snapSpeed(speed: Float): Float = clampSpeed(Math.round(speed / SPEED_STEP) * SPEED_STEP)
 }
 
 /** Framing of the video inside the screen: 0..1 on each axis, (0.5, 0.5) is centred. */

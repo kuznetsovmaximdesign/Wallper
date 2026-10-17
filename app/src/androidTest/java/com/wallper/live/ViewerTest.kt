@@ -9,6 +9,7 @@ import com.wallper.live.TestCatalog.Companion.SCENE_A
 import com.wallper.live.TestCatalog.Companion.SCENE_B
 import com.wallper.live.TestCatalog.Companion.SCENE_HFR
 import com.wallper.live.ui.components.TestTags
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -60,6 +61,13 @@ class ViewerTest {
         Screen.assertKeepsPlaying(app::videoArea, 2_500, "after speeding up")
         app.dragSlider(TestTags.SPEED_SLIDER, -0.6f)
         Screen.assertKeepsPlaying(app::videoArea, 2_500, "after slowing down")
+        // The ends of the slider: 4× and 0.5×, in half steps.
+        app.dragSlider(TestTags.SPEED_SLIDER, 1.5f)
+        assertEquals("4×", app.text(TestTags.DOCK_SPEED))
+        Screen.assertKeepsPlaying(app::videoArea, 2_500, "at 4×")
+        app.dragSlider(TestTags.SPEED_SLIDER, -1.5f)
+        assertEquals("0.5×", app.text(TestTags.DOCK_SPEED))
+        Screen.assertKeepsPlaying(app::videoArea, 2_500, "at 0.5×")
         app.tap(TestTags.DOCK_SPEED)
         Screen.assertKeepsPlaying(app::videoArea, 1_500, "after closing speed")
     }

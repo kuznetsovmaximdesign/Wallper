@@ -25,7 +25,8 @@ import kotlin.math.abs
  *  - on foldables, follows the hinge like iPhone Duo: each half of the inner panel is
  *    a pane of frosted glass hinged at the crease (blurrier and darker towards its far
  *    edge, slightly bent in perspective) that clears as the phone opens flat; the cover
- *    panel frosts over during the first degrees of opening.
+ *    panel frosts over during the first degrees of opening. Only while the hinge moves:
+ *    at rest the picture is sharp at any angle (see [HingeFrost]).
  *
  * GL work happens on the GLSurfaceView thread; [target] is touched on the main thread.
  */
@@ -43,6 +44,13 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     private var parallax = 0f
 
     @Volatile var revealEnabled = false
+        set(value) {
+            field = value
+            hingeFrost.enabled = value
+        }
+
+    /** Hinge-driven glass of foldable panels. */
+    private val hingeFrost = HingeFrost()
 
     /**
      * Main-thread callback: true once a video picture is on the surface, false while it
@@ -52,23 +60,25 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     private var showingPicture = false
 
     /** Panel this renderer draws on; only foldable panels react to the hinge. */
-    @Volatile var panel = PanelKind.Regular
+    var panel: PanelKind
+        get() = hingeFrost.panel
+        set(value) {
+            hingeFrost.panel = value
+        }
 
     /** True when the crease runs vertically on screen (the natural orientation). */
     @Volatile var creaseVertical = true
-
-    /** Latest hinge angle in degrees (180 = flat/open, 0 = closed). */
-    @Volatile private var hingeTarget = 180f
-    @Volatile private var hingeSnap: Float? = null
-    private var hinge = 180f
-    private var hingeVelocity = 0f
 
     /**
      * Coarse sensors (Samsung reports only 0/90/180°) need a softer spring so the
      * jumps between stops turn into one smooth motion.
      */
-    @Volatile var hingeCoarse = false
-    private var lastFrameNanos = 0L
+    var hingeCoarse: Boolean
+        get() = hingeFrost.coarse
+        set(value) {
+            hingeFrost.coarse = value
+        }
+
     @Volatile private var revealRequested = false
     private var revealStartNanos = 0L
     private var frost = 0f
@@ -131,13 +141,13 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
 
     /** Jumps straight to [degrees] (e.g. when a panel lights up mid-unfold). */
     fun snapHinge(degrees: Float) {
-        hingeTarget = degrees.coerceIn(0f, 180f)
-        hingeSnap = hingeTarget
+        hingeFrost.snap(degrees, System.nanoTime())
         requestRender()
     }
 
+    /** A hinge sensor reading (180 = flat/open, 0 = closed). */
     fun setHingeAngle(degrees: Float) {
-        hingeTarget = degrees.coerceIn(0f, 180f)
+        hingeFrost.onHinge(degrees, System.nanoTime())
         requestRender()
     }
 
@@ -289,43 +299,11 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
     }
 
-    /**
-     * Moves the displayed hinge angle towards the sensor value with a critically damped
-     * spring: it starts and settles softly, hides 1° sensor steps and turns Samsung's
-     * 0/90/180° stops into one continuous motion. Returns the fold amount 0..1.
-     */
+    /** Fold amount 0..1 of the hinge-driven glass; keeps frames coming while it changes. */
     private fun updateFold(): Float {
-        val now = System.nanoTime()
-        val dt = if (lastFrameNanos == 0L) 0f else ((now - lastFrameNanos) / 1e9f).coerceAtMost(0.05f)
-        lastFrameNanos = now
-        hingeSnap?.let {
-            hinge = it
-            hingeVelocity = 0f
-            hingeSnap = null
-        }
-        val target = if (revealEnabled && panel != PanelKind.Regular) hingeTarget else 180f
-        val omega = if (hingeCoarse) COARSE_OMEGA else FINE_OMEGA
-        // Semi-implicit Euler in small steps keeps the spring stable at any frame rate.
-        var remaining = dt
-        while (remaining > 0f) {
-            val h = minOf(remaining, 1f / 240f)
-            val acceleration = -2f * omega * hingeVelocity - omega * omega * (hinge - target)
-            hingeVelocity += acceleration * h
-            hinge += hingeVelocity * h
-            remaining -= h
-        }
-        if (abs(target - hinge) > 0.05f || abs(hingeVelocity) > 0.5f) {
-            requestRender()
-        } else {
-            hinge = target
-            hingeVelocity = 0f
-        }
-        val raw = when (panel) {
-            PanelKind.Inner -> ((180f - hinge) / 150f).coerceIn(0f, 1f)
-            PanelKind.Cover -> (hinge / 25f).coerceIn(0f, 1f)
-            PanelKind.Regular -> 0f
-        }
-        return raw * raw * (3f - 2f * raw) // smoothstep: no visible start/stop edges
+        val fold = hingeFrost.update(System.nanoTime())
+        if (hingeFrost.animating) requestRender()
+        return fold
     }
 
     /** Advances the reveal animation; it starts once a video frame is on screen. */
@@ -436,8 +414,6 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         const val PARALLAX_RANGE = 0.6f
         const val REVEAL_NANOS = 950_000_000f
         const val REVEAL_HOLD_NANOS = 120_000_000L
-        const val FINE_OMEGA = 16f   // ≈ 0.3 s to settle
-        const val COARSE_OMEGA = 9f  // ≈ 0.55 s across a 90° stop
         const val FOLD_EPSILON = 0.002f
 
         // Full-screen triangle generated from gl_VertexID: no vertex buffers needed.

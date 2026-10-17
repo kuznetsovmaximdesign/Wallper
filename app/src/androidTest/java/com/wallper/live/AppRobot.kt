@@ -183,6 +183,11 @@ class AppRobot {
 
     fun title(): String = fresh({ find(TestTags.TITLE) }) { it.text.orEmpty() }
 
+    /** Visible text of [tag], including text merged from its children (a button's label). */
+    fun text(tag: String): String = fresh({ find(tag) }) { element ->
+        element.text ?: element.children.firstNotNullOfOrNull { it.text } ?: element.contentDescription.orEmpty()
+    }
+
     /** A deliberate horizontal swipe, above the paging arrows at the sides' centre. */
     fun swipeVideo(towardsLeft: Boolean) {
         val b = visibleBounds(TestTags.VIDEO)
@@ -200,12 +205,13 @@ class AppRobot {
         SystemClock.sleep(SETTLE_MS)
     }
 
-    /** Drags a slider's thumb area by [fraction] of its width. */
+    /** Drags along a slider by [fraction] of its width, stopping at its ends. */
     fun dragSlider(tag: String, fraction: Float) {
         val b = bounds(tag)
         val y = b.centerY()
         val from = b.left + b.width() / 3
-        device.drag(from, y, (from + b.width() * fraction).toInt(), y, 25)
+        val to = (from + b.width() * fraction).toInt().coerceIn(b.left + 1, b.right - 1)
+        device.drag(from, y, to, y, 25)
         SystemClock.sleep(SETTLE_MS)
     }
 

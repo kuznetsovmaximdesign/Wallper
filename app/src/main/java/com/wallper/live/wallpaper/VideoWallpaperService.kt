@@ -12,8 +12,6 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.opengl.GLSurfaceView
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.Surface
 import android.view.SurfaceHolder
@@ -38,8 +36,6 @@ class VideoWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = VideoEngine()
 
     private companion object {
-        const val HINGE_SILENCE_MS = 400L
-
         /** Shared by the cover and inner engines: where the hinge was last seen. */
         @Volatile var lastHingeAngle: Float? = null
     }
@@ -56,17 +52,12 @@ class VideoWallpaperService : WallpaperService() {
         @Volatile private var coverFile: File? = null
 
         private val foldable = Foldables.isFoldable(this@VideoWallpaperService)
-        private val handler = Handler(Looper.getMainLooper())
         private val sensors = getSystemService(SensorManager::class.java)
         private var hingeRegistered = false
-
-        private val hingeFallback = Runnable { if (!hingeHeard) renderer.setHingeAngle(180f) }
-        private var hingeHeard = false
 
         private val hingeListener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
                 val angle = event.values[0]
-                hingeHeard = true
                 lastHingeAngle = angle
                 // Stops-only sensors (Samsung: 0/90/180°) get the softer spring.
                 if (angle % 90f == 0f) renderer.hingeCoarse = true
@@ -173,14 +164,11 @@ class VideoWallpaperService : WallpaperService() {
             hingeRegistered = if (enabled) {
                 renderer.hingeCoarse = sensor.resolution >= 30f
                 // A panel that lights up mid-unfold starts from the last known angle
-                // (frosted), never from a sharp picture that then jumps.
+                // (frosted), never from a sharp picture that then jumps. A silent sensor
+                // simply lets the glass clear once the hinge counts as still.
                 if (renderer.panel == PanelKind.Inner) renderer.snapHinge(lastHingeAngle ?: 60f)
-                hingeHeard = false
-                handler.removeCallbacks(hingeFallback)
-                handler.postDelayed(hingeFallback, HINGE_SILENCE_MS)
                 sensors.registerListener(hingeListener, sensor, SensorManager.SENSOR_DELAY_GAME)
             } else {
-                handler.removeCallbacks(hingeFallback)
                 sensors.unregisterListener(hingeListener)
                 false
             }

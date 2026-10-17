@@ -283,13 +283,13 @@ private fun SpeedPanel(speed: Float, onSpeed: (Float) -> Unit, onDone: () -> Uni
         Slider(
             value = speed,
             onValueChange = {
-                val snapped = (Math.round(it * 4) / 4f).coerceIn(Playback.MIN_SPEED, Playback.MAX_SPEED)
+                val snapped = Playback.snapSpeed(it)
                 if (snapped != speed) Haptics.tick(view)
                 onSpeed(snapped)
             },
             onValueChangeFinished = onDone,
             valueRange = Playback.MIN_SPEED..Playback.MAX_SPEED,
-            steps = 6,
+            steps = Playback.SPEED_STOPS,
             colors = sliderColors(),
             modifier = Modifier.testTag(TestTags.SPEED_SLIDER),
         )
