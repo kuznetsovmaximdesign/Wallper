@@ -118,7 +118,16 @@ class CodecLoopPlayer(
 
     override fun seekToStart(positionMs: Long) {
         worker.post {
-            val ex = extractor ?: return@post
+            if (released) return@post
+            // After a failure everything is rebuilt: a new connection and a fresh decoder.
+            val ex = extractor ?: run {
+                try {
+                    open()
+                } catch (e: Exception) {
+                    fail(e)
+                }
+                return@post
+            }
             ex.seekTo(startUs + positionMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             codec?.let {
                 heldOutput = -1
@@ -300,6 +309,17 @@ class CodecLoopPlayer(
 
     private fun fail(error: Throwable) {
         playing = false
+        runCatching { codec?.stop() }
+        runCatching { codec?.release() }
+        runCatching { extractor?.release() }
+        codec = null
+        extractor = null
+        format = null
+        inputDone = false
+        pendingInput = -1
+        heldOutput = -1
+        ended = false
+        firstFramePending = true
         val exception = error as? Exception ?: RuntimeException(error)
         main.post { listener?.onError(exception) }
     }

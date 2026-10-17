@@ -15,8 +15,10 @@ import com.wallper.live.data.settings.SettingsRepository
 import com.wallper.live.media.ClipExporter
 import com.wallper.live.media.CoverRepository
 import com.wallper.live.media.MediaProbe
+import com.wallper.live.media.MotionThumbnails
 import com.wallper.live.media.RemoteFiles
 import com.wallper.live.net.HttpClients
+import com.wallper.live.net.NetworkMonitor
 import com.wallper.live.playback.LoopPlayerFactory
 import com.wallper.live.playback.LoopSession
 import com.wallper.live.playback.LoopSpec
@@ -26,6 +28,8 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
 /** Manual dependency graph: one instance per process, shared by UI, worker and wallpaper. */
@@ -51,6 +55,15 @@ class AppContainer(private val app: Application) {
     val remoteFiles by lazy { RemoteFiles(http, File(app.cacheDir, "ranges")) }
 
     val covers by lazy { CoverRepository(remoteFiles, File(app.cacheDir, "covers")) }
+
+    val motionThumbs by lazy { MotionThumbnails(app, remoteFiles, File(app.cacheDir, "motion")) }
+
+    /** VPN on/off and other network switches: reconnect and retry what failed. */
+    val network by lazy {
+        NetworkMonitor(app, http).also { monitor ->
+            appScope.launch { monitor.changes.drop(1).collect { catalog.retryIfFailed() } }
+        }
+    }
 
     val exporter by lazy { ClipExporter(app, remoteFiles) }
 

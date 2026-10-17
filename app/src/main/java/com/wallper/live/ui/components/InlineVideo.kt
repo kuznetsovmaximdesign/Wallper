@@ -11,7 +11,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,6 +27,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wallper.live.WallperApplication
 import com.wallper.live.playback.LoopPlayer
 import com.wallper.live.playback.LoopSpec
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 
 /** TextureView that center-crops its video, so it can live inside rounded, clipped cards. */
 @SuppressLint("ViewConstructor")
@@ -58,19 +62,38 @@ class CropTextureView(context: Context) : TextureView(context) {
 }
 
 /**
- * Plays [spec] muted and looping inside a card (only the focused card mounts one).
+ * Plays [spec] muted and looping inside a card.
  * The view stays transparent until the first frame, so the cover never flashes black.
+ * A failed player is rebuilt with backoff and right after a network (VPN) switch.
  */
 @Composable
 fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val factory = remember(context) { (context.applicationContext as WallperApplication).container.loopPlayers }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val factory = container.loopPlayers
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val view = remember(context) { CropTextureView(context) }
     var rendered by remember(spec) { mutableStateOf(false) }
     val alpha by animateFloatAsState(if (rendered) 1f else 0f, tween(450), label = "inlineVideoAlpha")
+    var attempt by remember(spec) { mutableIntStateOf(0) }
+    var failed by remember(spec) { mutableStateOf(false) }
 
-    DisposableEffect(spec, lifecycle) {
+    LaunchedEffect(spec, failed) {
+        if (!failed) return@LaunchedEffect
+        delay(minOf(RETRY_BASE_MS shl minOf(attempt, 3), RETRY_MAX_MS))
+        failed = false
+        attempt++
+    }
+    LaunchedEffect(spec) {
+        container.network.changes.drop(1).collect {
+            if (failed) {
+                failed = false
+                attempt++
+            }
+        }
+    }
+
+    DisposableEffect(spec, lifecycle, attempt) {
         val player = factory.create(spec)
         player.repeat = true
         player.listener = object : LoopPlayer.Listener {
@@ -82,7 +105,9 @@ fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
                 rendered = true
             }
 
-            override fun onError(error: Exception) = Unit
+            override fun onError(error: Exception) {
+                failed = true
+            }
         }
         var surface: Surface? = null
         fun attach(texture: SurfaceTexture) {
@@ -123,3 +148,6 @@ fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
 
     AndroidView(factory = { view }, modifier = modifier.fillMaxSize().alpha(alpha))
 }
+
+private const val RETRY_BASE_MS = 1_500L
+private const val RETRY_MAX_MS = 12_000L

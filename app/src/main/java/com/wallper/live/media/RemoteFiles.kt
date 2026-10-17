@@ -144,7 +144,8 @@ class RemoteFiles(
                 return block()
             } catch (e: IOException) {
                 last = e
-                Thread.sleep(400L * (attempt + 1))
+                // Covers a network or VPN switch: 0.5, 1, 2, 4, 4 s.
+                if (attempt < ATTEMPTS - 1) Thread.sleep(minOf(500L shl attempt, 4_000L))
             }
         }
         throw last ?: IOException("Request failed")
@@ -170,7 +171,7 @@ class RemoteFiles(
         const val READ_AHEAD = 8 // ≈ 5 s of 4K Aerials
         const val MEMORY_CHUNKS = 12
         const val PREFETCH_THREADS = 3
-        const val ATTEMPTS = 4
+        const val ATTEMPTS = 6
         const val MAX_CACHE_BYTES = 800L shl 20
     }
 }

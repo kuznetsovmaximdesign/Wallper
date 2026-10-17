@@ -110,7 +110,9 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
 @Composable
 private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorActions, modifier: Modifier) {
     val context = LocalContext.current
-    val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val covers = container.covers
+    val motion = container.motionThumbs
     val items = state.visibleFootage.takeIf { list -> list.any { it.id == footage.id } } ?: listOf(footage)
     val edit = rememberSourceEdit(footage.id, ClipSource.Remote(footage.previewUrl ?: footage.masterUrl))
     // Light 1080p stream when Apple has one; otherwise the 4K 240 fps master, played by
@@ -137,7 +139,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
             ViewerPager(pager, items, footage.id, { it.id }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) spec else null,
-                    still = covers.cached(item) ?: item.coverUrl,
+                    still = covers.cached(item) ?: motion.poster(item.id) ?: item.coverUrl,
                     animateStill = false,
                     state = state,
                     speed = edit.speed,

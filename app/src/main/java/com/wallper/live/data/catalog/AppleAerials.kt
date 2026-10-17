@@ -29,11 +29,17 @@ class AppleAerials(
     private val cacheDir: File,
 ) {
 
-    suspend fun load(forceRefresh: Boolean): List<Footage> = withContext(Dispatchers.IO) {
+    /** Merged scenes; [Catalog.complete] is false when one of the feeds could not be read. */
+    class Catalog(val items: List<Footage>, val complete: Boolean)
+
+    suspend fun load(forceRefresh: Boolean): Catalog = withContext(Dispatchers.IO) {
         coroutineScope {
             val mac = async { runCatching { feed("macos26", forceRefresh) { macResourcesUrl() } }.getOrNull() }
             val tv = async { runCatching { feed("tvos16", forceRefresh) { TV_MANIFEST } }.getOrNull() }
-            merge(mac.await(), tv.await()).ifEmpty { throw IOException("No Aerials catalog available") }
+            val macFeed = mac.await()
+            val tvFeed = tv.await()
+            val items = merge(macFeed, tvFeed).ifEmpty { throw IOException("No Aerials catalog available") }
+            Catalog(items, complete = macFeed != null && tvFeed != null)
         }
     }
 

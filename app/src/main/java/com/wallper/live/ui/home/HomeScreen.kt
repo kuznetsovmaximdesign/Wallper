@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -81,11 +82,13 @@ import com.wallper.live.ui.components.InlineVideo
 import com.wallper.live.ui.components.pressScale
 import com.wallper.live.ui.components.shimmer
 import com.wallper.live.work.ExportJob
+import java.io.File
 
 /**
  * Video-first gallery: a hero card, a grid of portrait cards and a floating toolbar.
- * The card nearest to the centre of the viewport plays its video in place, so the
- * gallery feels alive while only one decoder is ever busy.
+ * The cards nearest to the centre of the viewport play in place: the hero streams the
+ * real video, grid cards play short seamless loops cut on the device (light enough to
+ * run several at once). Cards further away show a sharp still.
  */
 @Composable
 fun HomeScreen(
@@ -111,8 +114,8 @@ fun HomeScreen(
             state.clips.mapTo(HashSet()) { it.id }
         }
     }
-    val centeredId by remember(gridState, mediaIds) { derivedStateOf { centeredItem(gridState, mediaIds) } }
-    val playingId = centeredId.takeIf { autoplay }
+    val centered by remember(gridState, mediaIds) { derivedStateOf { centeredItems(gridState, mediaIds, MAX_LIVE_CARDS) } }
+    val playing = if (autoplay) centered else emptySet()
 
     // Start from the top whenever the content set changes.
     LaunchedEffect(state.tab, state.category) { gridState.scrollToItem(0) }
@@ -133,8 +136,8 @@ fun HomeScreen(
         ) {
             fullWidth("header") { Header(state.tab, onSettings) }
             when (state.tab) {
-                HomeTab.Apple -> appleTab(state, onCategory, onRetry, onFootage, selectedId, playingId)
-                HomeTab.Mine -> mineTab(state, onClip, selectedId, playingId)
+                HomeTab.Apple -> appleTab(state, onCategory, onRetry, onFootage, selectedId, playing)
+                HomeTab.Mine -> mineTab(state, onClip, selectedId, playing)
             }
         }
 
@@ -155,14 +158,15 @@ fun HomeScreen(
     }
 }
 
-/** Key of the media card whose centre is closest to the viewport centre. */
-private fun centeredItem(grid: LazyGridState, ids: Set<String>): String? {
+/** Keys of the (at most [count]) visible media cards closest to the viewport centre. */
+private fun centeredItems(grid: LazyGridState, ids: Set<String>, count: Int): Set<String> {
     val info = grid.layoutInfo
     val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
     return info.visibleItemsInfo
         .filter { it.key in ids }
-        .minByOrNull { kotlin.math.abs(it.offset.y + it.size.height / 2 - center) }
-        ?.key as? String
+        .sortedBy { kotlin.math.abs(it.offset.y + it.size.height / 2 - center) }
+        .take(count)
+        .mapNotNullTo(HashSet()) { it.key as? String }
 }
 
 private fun LazyGridScope.fullWidth(key: String, content: @Composable () -> Unit) =
@@ -191,7 +195,7 @@ private fun LazyGridScope.appleTab(
     onRetry: () -> Unit,
     onFootage: (Footage) -> Unit,
     selectedId: String?,
-    playingId: String?,
+    playing: Set<String>,
 ) {
     fullWidth("categories") { Categories(state.category, onCategory) }
     when (state.catalog) {
@@ -210,13 +214,13 @@ private fun LazyGridScope.appleTab(
             val hero = all.firstOrNull()
             if (hero != null) {
                 item(key = hero.id, span = { GridItemSpan(maxLineSpan) }) {
-                    FootageCard(hero, state, hero.id == selectedId, hero.id == playingId, hero = true) {
+                    FootageCard(hero, state, hero.id == selectedId, hero.id in playing, hero = true) {
                         onFootage(hero)
                     }
                 }
             }
             items(all.drop(1), key = { it.id }) { footage ->
-                FootageCard(footage, state, footage.id == selectedId, footage.id == playingId) {
+                FootageCard(footage, state, footage.id == selectedId, footage.id in playing) {
                     onFootage(footage)
                 }
             }
@@ -228,7 +232,7 @@ private fun LazyGridScope.mineTab(
     state: MainUiState,
     onClip: (Clip) -> Unit,
     selectedId: String?,
-    playingId: String?,
+    playing: Set<String>,
 ) {
     state.exports.filter { it.state == ExportJob.State.Running && it.footageId == null }.forEach { job ->
         item(key = "job-${job.id}") {
@@ -238,7 +242,7 @@ private fun LazyGridScope.mineTab(
         }
     }
     items(state.clips, key = { it.id }) { clip ->
-        ClipCard(clip, state.rolesOf(clip), clip.id == selectedId, clip.id == playingId) { onClip(clip) }
+        ClipCard(clip, state.rolesOf(clip), clip.id == selectedId, clip.id in playing) { onClip(clip) }
     }
     if (state.clips.isEmpty()) {
         fullWidth("empty") {
@@ -307,15 +311,42 @@ private fun FootageCard(
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
-    // Apple's small still appears instantly; a sharp frame cut from the video replaces it.
-    var cover by remember(footage.id) { mutableStateOf<Any?>(covers.cached(footage) ?: footage.coverUrl) }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val covers = container.covers
+    val motion = container.motionThumbs
+    // Apple's own stills are tiny (356 px): until something sharp exists they are shown blurred.
+    var cover by remember(footage.id) {
+        mutableStateOf<Any?>(
+            if (hero) {
+                covers.cached(footage) ?: motion.poster(footage.id) ?: footage.coverUrl
+            } else {
+                motion.poster(footage.id) ?: covers.cached(footage) ?: footage.coverUrl
+            },
+        )
+    }
+    var loop by remember(footage.id) { mutableStateOf(if (hero) null else motion.cached(footage.id)) }
     LaunchedEffect(footage.id) {
-        if (covers.cached(footage) == null) covers.cover(footage)?.let { cover = it }
+        if (hero) {
+            // Full-width card: a 2560 px frame of the master, the live stream plays over it.
+            if (covers.cached(footage) == null) covers.cover(footage)?.let { cover = it }
+        } else if (loop == null) {
+            val made = motion.get(footage.id, footage.previewUrl ?: footage.masterUrl)
+            if (made != null) {
+                motion.poster(footage.id)?.let { cover = it }
+                loop = made
+            } else if (cover !is File) {
+                covers.cover(footage)?.let { cover = it }
+            }
+        }
+    }
+    val video = when {
+        !playing -> null
+        hero -> footage.inlineSpec()
+        else -> loop?.let { LoopSpec(Uri.fromFile(it), loopMs = 0, fadeMs = 0) }
     }
     MediaCard(
         cover = cover,
-        video = if (playing) footage.inlineSpec() else null,
+        video = video,
         title = footage.title,
         caption = footage.collection?.takeIf { it != footage.title },
         selected = selected,
@@ -334,10 +365,18 @@ private fun ClipCard(
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val library = remember(context) { (context.applicationContext as WallperApplication).container.library }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val library = container.library
+    val motion = container.motionThumbs
+    // The clip itself is 4K: a light loop cut from it lets several cards play at once.
+    val motionId = "clip-${clip.id}"
+    var loop by remember(clip.id) { mutableStateOf(motion.cached(motionId)) }
+    LaunchedEffect(clip.id) {
+        if (loop == null) loop = motion.get(motionId, Uri.fromFile(library.fileOf(clip)).toString())
+    }
     MediaCard(
         cover = library.coverOf(clip),
-        video = if (playing) LoopSpec(Uri.fromFile(library.fileOf(clip)), clip.loopMs, clip.fadeMs) else null,
+        video = if (playing) loop?.let { LoopSpec(Uri.fromFile(it), loopMs = 0, fadeMs = 0) } else null,
         title = clip.title,
         caption = (if (clip.isUhd) "4K · " else "") + formatDuration(clip.loopMs),
         selected = selected,
@@ -378,11 +417,13 @@ private fun MediaCard(
     ) {
         Box(Modifier.fillMaxSize().shimmer())
         if (cover != null) {
+            // A remote URL is Apple's small still: soften it instead of showing pixels.
+            val lowRes = cover is String
             AsyncImage(
                 model = cover,
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().then(if (lowRes) Modifier.blur(LOW_RES_BLUR) else Modifier),
             )
         }
         if (video != null) InlineVideo(video)
@@ -482,6 +523,8 @@ private fun ProgressBadge(progress: Float) {
 }
 
 private const val CARD_RATIO = 9f / 16f
+private const val MAX_LIVE_CARDS = 6
+private val LOW_RES_BLUR = 14.dp
 private const val HERO_RATIO = 4f / 5f
 private const val PREVIEW_START_MS = 30_000L
 private const val PREVIEW_LENGTH_MS = 20_000L

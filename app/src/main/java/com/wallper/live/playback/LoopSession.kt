@@ -1,5 +1,7 @@
 package com.wallper.live.playback
 
+import android.os.Handler
+import android.os.Looper
 import android.view.Choreographer
 
 /**
@@ -34,6 +36,8 @@ class LoopSession(
     private var target: VideoTarget? = null
 
     private val fadeEnabled get() = players.size == 2
+    private val main = Handler(Looper.getMainLooper())
+    private var failures = 0
 
     var speed: Float = 1f
         set(value) {
@@ -96,6 +100,7 @@ class LoopSession(
     fun release() {
         if (released) return
         released = true
+        main.removeCallbacksAndMessages(null)
         stopTicking()
         target?.onSurfacesChanged = null
         target = null
@@ -169,14 +174,30 @@ class LoopSession(
             target?.setVideoSize(width, height, pixelRatio)
         }
 
+        override fun onFirstFrame() {
+            failures = 0
+        }
+
         override fun onError(error: Exception) {
             if (released) return
             if (fadeEnabled) {
                 fallBackToSinglePlayer(player)
             } else {
-                player.seekToStart()
-                if (playing) player.play()
+                // Usually the network (e.g. a VPN going up or down): retry with backoff.
+                val delayMs = minOf(RETRY_BASE_MS shl minOf(failures, 3), RETRY_MAX_MS)
+                failures++
+                main.postDelayed({
+                    if (!released && player in players) {
+                        player.seekToStart()
+                        if (playing) player.play()
+                    }
+                }, delayMs)
             }
         }
+    }
+
+    private companion object {
+        const val RETRY_BASE_MS = 1_000L
+        const val RETRY_MAX_MS = 8_000L
     }
 }
