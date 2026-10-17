@@ -14,11 +14,5 @@ jobs:
           curl -sfL -o m3.jar $G/androidx/compose/material3/material3-android/1.5.0-beta01/material3-android-1.5.0-beta01-sources.jar || echo "no sources jar"
           unzip -q -o m3.jar || true
           sig() { grep -rhn -A "$2" --include=*.kt -E "$1" . | grep -v '^\S*-\s*\*' | head -${3:-60}; echo "-----"; }
-          sig '^(@[A-Za-z]+ )*fun (HorizontalFloatingToolbar|SplitButtonLayout|ToggleButton|TonalToggleButton|LoadingIndicator|ContainedLoadingIndicator|MaterialExpressiveTheme|CircularWavyProgressIndicator|FilledTonalIconButton)\(' 22 400
-          sig 'fun (LeadingButton|TrailingButton|VibrantFloatingActionButton|StandardFloatingActionButton|standardFloatingToolbarColors|vibrantFloatingToolbarColors|leadingButtonShapesFor|trailingButtonShapesFor|shapesFor|shapes|toggleButtonColors|tonalToggleButtonColors)\(' 14 400
-          sig 'fun (expressive|standard)\(\)' 1 10
-          grep -rn "ExperimentalMaterial3ExpressiveApi" --include=*.kt . | grep "annotation class" | head
-          grep -rln "fun Slider(" . | head -3
-          sig '^fun Slider\(' 16 80
-          sig 'fun Track\(' 14 60
-          sig 'fun Thumb\(' 10 30
+          sig '^public fun (HorizontalFloatingToolbar|SplitButtonLayout|ToggleButton|TonalToggleButton|LoadingIndicator|ContainedLoadingIndicator|MaterialExpressiveTheme|CircularWavyProgressIndicator|FilledTonalIconButton|FilledIconToggleButton)\(' 24 700
+          grep -rn "class ToggleButtonSize\|val size: ToggleButtonSize\|ExtraSmallContainerHeight: Dp\|val MinHeight\|SmallContainerHeight" --include=*.kt . | head -20
