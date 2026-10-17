@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.wallper.live.R
@@ -245,7 +247,11 @@ private fun InstallSplitButton(model: InstallModel, onInstall: (WallpaperTarget)
                         modifier = Modifier.graphicsLayer { rotationZ = rotation },
                     )
                 }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenu(
+                    expanded = menu,
+                    onDismissRequest = { menu = false },
+                    modifier = Modifier.semantics { testTagsAsResourceId = true }, // a popup window
+                ) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.install_lock)) },
                         leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },

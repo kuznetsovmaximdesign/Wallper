@@ -25,9 +25,15 @@ object Screen {
     }
 
     fun shot(): Bitmap {
-        val raw = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
-            ?: error("Screenshot failed")
-        return if (raw.config == Bitmap.Config.HARDWARE) raw.copy(Bitmap.Config.ARGB_8888, false) else raw
+        // A screenshot can fail while windows change (e.g. the wallpaper picker closing).
+        repeat(10) {
+            val raw = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+            if (raw != null) {
+                return if (raw.config == Bitmap.Config.HARDWARE) raw.copy(Bitmap.Config.ARGB_8888, false) else raw
+            }
+            SystemClock.sleep(300)
+        }
+        error("Screenshot failed")
     }
 
     fun stats(bitmap: Bitmap, area: Rect): Stats {

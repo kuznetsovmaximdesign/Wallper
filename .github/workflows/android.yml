@@ -160,6 +160,15 @@ jobs:
           adb=$ANDROID_HOME/platform-tools/adb
           echo "===== CRASHES ====="
           timeout 20 $adb logcat -d -b crash | tail -60 || true
+          echo "===== ANR TRACES (main thread) ====="
+          timeout 10 $adb root > /dev/null 2>&1 || true
+          sleep 3
+          for f in $(timeout 10 $adb shell ls /data/anr/ 2>/dev/null | tr -d '\r'); do
+            echo "--- $f"
+            timeout 10 $adb shell cat "/data/anr/$f" > anr.txt 2>/dev/null || continue
+            grep -m1 "Cmd line" anr.txt || true
+            awk '/^"main"/{p=1} p{print} p&&/^$/{exit}' anr.txt | head -45
+          done
           echo "===== APP ====="
           timeout 20 $adb logcat -d | grep -E "WallperScreen|WallperTest|AndroidRuntime|com.wallper" | grep -v THREAD_STATE | tail -80 || true
 

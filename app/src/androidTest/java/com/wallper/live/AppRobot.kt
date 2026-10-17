@@ -8,7 +8,6 @@ import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Configurator
-import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
@@ -78,7 +77,8 @@ class AppRobot {
     fun scrollTo(tag: String): UiObject2 {
         repeat(6) {
             device.findObject(By.res(tag))?.takeIf { it.visibleBounds.height() > 40 }?.let { return it }
-            find(TestTags.GRID).scroll(Direction.DOWN, 0.5f)
+            val x = device.displayWidth / 2
+            device.swipe(x, device.displayHeight * 3 / 4, x, device.displayHeight / 3, 30)
             SystemClock.sleep(SETTLE_MS)
         }
         return find(tag)

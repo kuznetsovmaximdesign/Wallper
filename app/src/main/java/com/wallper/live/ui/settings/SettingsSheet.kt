@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import com.wallper.live.BuildConfig
 import com.wallper.live.R
@@ -51,7 +53,13 @@ fun SettingsSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
-        Column(Modifier.padding(horizontal = 12.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
+        Column(
+            Modifier
+                .semantics { testTagsAsResourceId = true } // the sheet is a separate window
+                .padding(horizontal = 12.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp),
+        ) {
             Text(
                 stringResource(R.string.settings_title),
                 style = MaterialTheme.typography.headlineSmall,
