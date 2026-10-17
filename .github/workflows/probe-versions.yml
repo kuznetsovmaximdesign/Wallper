@@ -7,16 +7,26 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Library versions
+      - name: Versions
         run: |
-          for a in androidx/compose/compose-bom androidx/compose/material3/material3 androidx/compose/foundation/foundation \
-                   androidx/media3/media3-exoplayer androidx/activity/activity-compose androidx/core/core-ktx \
-                   androidx/lifecycle/lifecycle-runtime-compose androidx/test/ext/junit androidx/test/runner \
-                   androidx/test/rules androidx/test/uiautomator/uiautomator androidx/test/espresso/espresso-intents \
-                   androidx/compose/ui/ui-test-junit4 com/android/tools/build/gradle androidx/work/work-runtime-ktx \
-                   androidx/datastore/datastore-preferences androidx/window/window; do
-            echo "== $a: $(curl -s https://dl.google.com/android/maven2/$a/maven-metadata.xml | grep -o '<version>[^<]*</version>' | sed 's/<[^>]*>//g' | tail -12 | tr '\n' ' ')"
+          G=https://dl.google.com/android/maven2
+          M=https://repo1.maven.org/maven2
+          v() { curl -s $1/maven-metadata.xml | grep -o '<version>[^<]*</version>' | sed 's/<[^>]*>//g' | grep -v -- '-' | tr '\n' ' '; }
+          echo "AGP: $(v $G/com/android/tools/build/gradle | tr ' ' '\n' | grep '^8\.1[2-3]\|^9\.' | tr '\n' ' ')"
+          echo "kotlin: $(v $M/org/jetbrains/kotlin/kotlin-gradle-plugin | tr ' ' '\n' | grep '^2\.[2-4]' | tr '\n' ' ')"
+          echo "serialization: $(v $M/org/jetbrains/kotlinx/kotlinx-serialization-json | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
+          echo "coroutines: $(v $M/org/jetbrains/kotlinx/kotlinx-coroutines-android | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
+          echo "coil: $(v $M/io/coil-kt/coil3/coil-compose | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
+          echo "okhttp: $(v $M/com/squareup/okhttp3/okhttp | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
+          echo "material3 stable: $(v $G/androidx/compose/material3/material3 | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
+          echo "icons: $(v $G/androidx/compose/material/material-icons-core | tr ' ' '\n' | tail -3 | tr '\n' ' ')"
+          echo "--- BOM 2026.09.00"
+          curl -s $G/androidx/compose/compose-bom/2026.09.00/compose-bom-2026.09.00.pom | grep -A1 '<artifactId>\(material3\|foundation\|ui\|ui-test-junit4\|material-icons-core\)</artifactId>' | grep -o '<[a-zA-Z]*>[^<]*<' | tr '\n' ' '
+          echo
+          for p in androidx/compose/material3/material3/1.5.0-beta01/material3-1.5.0-beta01 androidx/compose/foundation/foundation/1.12.1/foundation-1.12.1; do
+            echo "--- $p.module deps:"
+            curl -s $G/$p.module | grep -o '"group": "[^"]*",[^}]*"module": "[^"]*"[^}]*"requires": "[^"]*"' | sed 's/[ \n]*"version": {//' | sort -u | head -40
+            curl -s -o /tmp/a.aar $G/$p.aar && unzip -p /tmp/a.aar META-INF/com/android/build/gradle/aar-metadata.properties
           done
-          echo "== ffmpeg: $(which ffmpeg || echo missing)"
-          echo "== kvm: $(ls -l /dev/kvm 2>&1)"
-          ls $ANDROID_HOME/platforms $ANDROID_HOME/build-tools $ANDROID_HOME/system-images 2>&1 | head -40
+          echo "--- gradle:"
+          curl -s https://services.gradle.org/versions/all | grep -o '"version" : "[89]\.[0-9.]*"' | head -12 | tr '\n' ' '
