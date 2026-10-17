@@ -20,7 +20,7 @@ import android.view.Choreographer
  * Must be used on the main thread.
  */
 class LoopSession(
-    factory: LoopPlayerFactory,
+    private val factory: LoopPlayerFactory,
     private val spec: LoopSpec,
     seamless: Boolean,
     startPositionMs: Long = 0,
@@ -47,6 +47,9 @@ class LoopSession(
 
     val positionMs: Long get() = players.getOrNull(front)?.positionMs ?: 0
 
+    /** The front player has buffered enough to show its first picture. */
+    val isReady: Boolean get() = players.getOrNull(front)?.isReady == true
+
     private val ticker = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!ticking) return
@@ -55,15 +58,27 @@ class LoopSession(
         }
     }
 
+    /** The cross-fade partner is created once the front player shows its first picture. */
+    private var wantsFade = seamless && spec.fadeMs > 0
+
     init {
-        val count = if (seamless && spec.fadeMs > 0) 2 else 1
-        repeat(count) {
-            val player = factory.create(spec)
-            player.repeat = count == 1
-            player.listener = PlayerListener(player)
-            players += player
-        }
-        if (startPositionMs > 0) players[0].seekToStart(startPositionMs.coerceIn(0, spec.loopMs))
+        // One decoder first: the picture appears sooner when it does not share the
+        // network and the hardware with the second one.
+        val player = factory.create(spec)
+        player.repeat = !wantsFade
+        player.listener = PlayerListener(player)
+        players += player
+        if (startPositionMs > 0) player.seekToStart(startPositionMs.coerceIn(0, spec.loopMs))
+    }
+
+    private fun addFadePartner() {
+        if (!wantsFade || released || players.size != 1) return
+        wantsFade = false
+        val partner = factory.create(spec)
+        partner.listener = PlayerListener(partner)
+        players += partner
+        bindSurfaces()
+        if (playing) startTicking()
     }
 
     fun attach(newTarget: VideoTarget) {
@@ -176,6 +191,7 @@ class LoopSession(
 
         override fun onFirstFrame() {
             failures = 0
+            if (player === players.getOrNull(0)) addFadePartner()
         }
 
         override fun onError(error: Exception) {

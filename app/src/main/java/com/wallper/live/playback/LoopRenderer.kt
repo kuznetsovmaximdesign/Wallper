@@ -44,6 +44,13 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
 
     @Volatile var revealEnabled = false
 
+    /**
+     * Main-thread callback: true once a video picture is on the surface, false while it
+     * shows black (no frame yet). Lets the UI keep a still above it instead of black.
+     */
+    @Volatile var onPictureChanged: ((Boolean) -> Unit)? = null
+    private var showingPicture = false
+
     /** Panel this renderer draws on; only foldable panels react to the hinge. */
     @Volatile var panel = PanelKind.Regular
 
@@ -214,8 +221,10 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         if (program == 0 || !hasFrame[f]) {
             GLES30.glClearColor(0f, 0f, 0f, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            reportPicture(false)
             return
         }
+        reportPicture(true)
 
         // Cover crop in normalised video coordinates.
         val surfaceAspect = width.toFloat() / height
@@ -261,6 +270,12 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         } else {
             drawVideo(f, b, scaleX, scaleY, fx, fy)
         }
+    }
+
+    private fun reportPicture(showing: Boolean) {
+        if (showing == showingPicture) return
+        showingPicture = showing
+        main.post { onPictureChanged?.invoke(showing) }
     }
 
     private fun drawVideo(f: Int, b: Int, scaleX: Float, scaleY: Float, fx: Float, fy: Float) {

@@ -1,10 +1,6 @@
 package com.wallper.live.ui.home
 
 import android.net.Uri
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,12 +36,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -60,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,11 +76,12 @@ import com.wallper.live.core.WallpaperRole
 import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.core.formatDuration
 import com.wallper.live.data.catalog.CatalogState
+import com.wallper.live.media.ClipSource
 import com.wallper.live.playback.LoopSpec
 import com.wallper.live.ui.HomeTab
 import com.wallper.live.ui.MainUiState
-import com.wallper.live.ui.components.GlassSurface
 import com.wallper.live.ui.components.InlineVideo
+import com.wallper.live.ui.components.TestTags
 import com.wallper.live.ui.components.pressScale
 import com.wallper.live.ui.components.shimmer
 import com.wallper.live.work.ExportJob
@@ -124,7 +127,7 @@ fun HomeScreen(
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Adaptive(minSize = 160.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().testTag(TestTags.GRID),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
@@ -180,9 +183,14 @@ private fun Header(tab: HomeTab, onSettings: () -> Unit) {
             style = MaterialTheme.typography.displaySmall,
             modifier = Modifier.weight(1f),
         )
-        IconButton(
+        FilledTonalIconButton(
             onClick = onSettings,
-            modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
+            shapes = IconButtonDefaults.shapes(),
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+            modifier = Modifier.size(48.dp).testTag(TestTags.SETTINGS),
         ) {
             Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.action_settings))
         }
@@ -259,7 +267,7 @@ private fun LazyGridScope.mineTab(
     }
 }
 
-/** Expressive pill row: the selected chip fills and morphs from a rounded square to a pill. */
+/** Expressive toggle buttons: the selected one fills and morphs from a pill to a rounded square. */
 @Composable
 private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?) -> Unit) {
     val options = listOf(
@@ -272,30 +280,18 @@ private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?
     )
     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 6.dp)) {
         items(options, key = { it.second }) { (category, label) ->
-            val isSelected = selected == category
-            val radius by animateDpAsState(
-                if (isSelected) 20.dp else 12.dp,
-                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
-                label = "chipRadius",
-            )
-            val container by animateColorAsState(
-                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                label = "chipColor",
-            )
-            val interaction = remember { MutableInteractionSource() }
-            Box(
-                Modifier
-                    .pressScale(interaction)
-                    .clip(RoundedCornerShape(radius))
-                    .background(container)
-                    .clickable(interactionSource = interaction, indication = null) { onCategory(category) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            ToggleButton(
+                checked = selected == category,
+                onCheckedChange = { onCategory(category) },
+                colors = ToggleButtonDefaults.colors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    checkedContainerColor = MaterialTheme.colorScheme.primary,
+                    checkedContentColor = MaterialTheme.colorScheme.onPrimary,
+                ),
+                modifier = Modifier.testTag(TestTags.category(category?.name ?: "All")),
             ) {
-                Text(
-                    stringResource(label),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                )
+                Text(stringResource(label), style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -339,12 +335,17 @@ private fun FootageCard(
             }
         }
     }
+    // Cards in view learn their video's length now, so the viewer starts playing at once.
+    LaunchedEffect(footage.id, playing) {
+        if (playing) container.probe.durationMs(ClipSource.of(footage.previewUrl ?: footage.masterUrl))
+    }
     val video = when {
         !playing -> null
         hero -> footage.inlineSpec()
         else -> loop?.let { LoopSpec(Uri.fromFile(it), loopMs = 0, fadeMs = 0) }
     }
     MediaCard(
+        tag = TestTags.card(footage.id),
         cover = cover,
         video = video,
         title = footage.title,
@@ -375,6 +376,7 @@ private fun ClipCard(
         if (loop == null) loop = motion.get(motionId, Uri.fromFile(library.fileOf(clip)).toString())
     }
     MediaCard(
+        tag = TestTags.card(clip.id),
         cover = library.coverOf(clip),
         video = if (playing) loop?.let { LoopSpec(Uri.fromFile(it), loopMs = 0, fadeMs = 0) } else null,
         title = clip.title,
@@ -396,6 +398,7 @@ private fun ClipCard(
 
 @Composable
 private fun MediaCard(
+    tag: String,
     cover: Any?,
     video: LoopSpec?,
     title: String,
@@ -413,7 +416,8 @@ private fun MediaCard(
             .aspectRatio(if (hero) HERO_RATIO else CARD_RATIO)
             .clip(shape)
             .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .testTag(tag),
     ) {
         Box(Modifier.fillMaxSize().shimmer())
         if (cover != null) {
@@ -450,48 +454,47 @@ private fun MediaCard(
     }
 }
 
-/** Floating toolbar (Material 3 Expressive): tabs in a pill plus a separate add action. */
+/** Material 3 Expressive floating toolbar: the two tabs plus a FAB for importing a video. */
 @Composable
 private fun BottomToolbar(tab: HomeTab, onTab: (HomeTab) -> Unit, onImport: () -> Unit, modifier: Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        GlassSurface(RoundedCornerShape(50), tint = Color(0xFF16161D)) {
-            Row(Modifier.padding(5.dp)) {
-                ToolbarTab(stringResource(R.string.tab_gallery), tab == HomeTab.Apple) { onTab(HomeTab.Apple) }
-                ToolbarTab(stringResource(R.string.tab_mine), tab == HomeTab.Mine) { onTab(HomeTab.Mine) }
+    HorizontalFloatingToolbar(
+        expanded = true,
+        floatingActionButton = {
+            FloatingToolbarDefaults.VibrantFloatingActionButton(
+                onClick = onImport,
+                modifier = Modifier.testTag(TestTags.IMPORT),
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.action_import))
             }
-        }
-        val interaction = remember { MutableInteractionSource() }
-        Box(
-            Modifier
-                .pressScale(interaction)
-                .size(56.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable(interactionSource = interaction, indication = null, onClick = onImport),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.Add,
-                contentDescription = stringResource(R.string.action_import),
-                tint = MaterialTheme.colorScheme.onPrimary,
-            )
-        }
+        },
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(
+            toolbarContainerColor = Color(0xFF17171E),
+            toolbarContentColor = Color.White,
+            fabContainerColor = MaterialTheme.colorScheme.primary,
+            fabContentColor = MaterialTheme.colorScheme.onPrimary,
+        ),
+        modifier = modifier,
+    ) {
+        ToolbarTab(stringResource(R.string.tab_gallery), tab == HomeTab.Apple, TestTags.TAB_GALLERY) { onTab(HomeTab.Apple) }
+        ToolbarTab(stringResource(R.string.tab_mine), tab == HomeTab.Mine, TestTags.TAB_MINE) { onTab(HomeTab.Mine) }
     }
 }
 
 @Composable
-private fun ToolbarTab(label: String, selected: Boolean, onClick: () -> Unit) {
-    val container by animateColorAsState(if (selected) Color.White else Color.Transparent, label = "tabColor")
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        Modifier
-            .pressScale(interaction)
-            .clip(RoundedCornerShape(50))
-            .background(container)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 13.dp),
+private fun ToolbarTab(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    ToggleButton(
+        checked = selected,
+        onCheckedChange = { onClick() },
+        colors = ToggleButtonDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = Color.White,
+            checkedContainerColor = Color.White,
+            checkedContentColor = Color.Black,
+        ),
+        elevation = null,
+        modifier = Modifier.testTag(tag),
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = if (selected) Color.Black else Color.White)
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -512,12 +515,11 @@ private fun StatusBadge(label: Int) {
 @Composable
 private fun ProgressBadge(progress: Float) {
     Box(Modifier.size(40.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(
+        CircularWavyProgressIndicator(
             progress = { progress.coerceIn(0.02f, 1f) },
-            modifier = Modifier.size(28.dp),
+            modifier = Modifier.size(30.dp),
             color = Color.White,
             trackColor = Color.White.copy(alpha = 0.2f),
-            strokeWidth = 3.dp,
         )
     }
 }

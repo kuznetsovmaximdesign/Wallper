@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.wallper.live"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.wallper.live"
@@ -18,6 +18,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+        // UI tests run against a fake catalog of generated videos (see androidTest).
+        testInstrumentationRunner = "com.wallper.live.WallperTestRunner"
     }
 
     signingConfigs {
@@ -69,6 +71,10 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        // Material 3 Expressive components are still marked experimental.
+        optIn.add("androidx.compose.material3.ExperimentalMaterial3Api")
+        optIn.add("androidx.compose.material3.ExperimentalMaterial3ExpressiveApi")
+        optIn.add("androidx.compose.ui.ExperimentalComposeUiApi")
     }
 }
 
@@ -104,4 +110,10 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
+
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.kotlinx.coroutines.android)
 }

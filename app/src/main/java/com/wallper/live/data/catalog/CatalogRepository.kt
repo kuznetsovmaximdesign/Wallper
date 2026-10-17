@@ -17,7 +17,7 @@ sealed interface CatalogState {
 }
 
 class CatalogRepository(
-    private val apple: AppleAerials,
+    private val source: CatalogSource,
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
@@ -43,9 +43,9 @@ class CatalogRepository(
         if (_state.value is CatalogState.Error || (_state.value is CatalogState.Ready && !complete)) refresh(force = true)
     }
 
-    private suspend fun loadWithRetry(force: Boolean): AppleAerials.Catalog? {
+    private suspend fun loadWithRetry(force: Boolean): Catalog? {
         repeat(ATTEMPTS) { attempt ->
-            runCatching { apple.load(force) }.onSuccess { return it }
+            runCatching { source.load(force) }.onSuccess { return it }
             if (attempt < ATTEMPTS - 1) delay(RETRY_MS * (attempt + 1))
         }
         return null

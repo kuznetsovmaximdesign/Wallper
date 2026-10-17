@@ -1,7 +1,8 @@
 package com.wallper.live.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -62,10 +63,12 @@ private val WallperShapes = Shapes(
     extraLarge = RoundedCornerShape(36.dp),
 )
 
+/** Material 3 Expressive: springy motion scheme, shape-morphing components. */
 @Composable
 fun WallperTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
+    MaterialExpressiveTheme(
         colorScheme = WallperColors,
+        motionScheme = MotionScheme.expressive(),
         typography = WallperTypography,
         shapes = WallperShapes,
         content = content,

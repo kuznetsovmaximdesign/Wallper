@@ -9,6 +9,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
@@ -66,6 +67,20 @@ class LoopPlayerFactory(
         if (spec.highFrameRate) CodecLoopPlayer(context, remote, spec) else ExoLoopPlayer(context, mediaSourceFactory, spec)
 }
 
+/**
+ * Starts playback after ~0.5 s of buffered video instead of ExoPlayer's default 2.5 s:
+ * previews should move the moment they appear. The buffer keeps filling while playing.
+ */
+@OptIn(UnstableApi::class)
+private fun fastStartLoadControl(): DefaultLoadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(
+            /* minBufferMs = */ 15_000,
+            /* maxBufferMs = */ 40_000,
+            /* bufferForPlaybackMs = */ 500,
+            /* bufferForPlaybackAfterRebufferMs = */ 1_500,
+        )
+        .build()
+
 /** [LoopPlayer] backed by ExoPlayer, for regular-frame-rate sources. */
 @OptIn(UnstableApi::class)
 private class ExoLoopPlayer(
@@ -77,6 +92,7 @@ private class ExoLoopPlayer(
     private val player: ExoPlayer = ExoPlayer.Builder(context)
         .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true))
         .setMediaSourceFactory(mediaSourceFactory)
+        .setLoadControl(fastStartLoadControl())
         .build()
 
     override var listener: LoopPlayer.Listener? = null

@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import androidx.work.WorkManager
 import com.wallper.live.data.catalog.AppleAerials
 import com.wallper.live.data.catalog.CatalogRepository
+import com.wallper.live.data.catalog.CatalogSource
 import com.wallper.live.data.library.ClipLibrary
 import com.wallper.live.data.settings.SettingsRepository
 import com.wallper.live.media.ClipExporter
@@ -34,7 +35,11 @@ import kotlinx.serialization.json.Json
 
 /** Manual dependency graph: one instance per process, shared by UI, worker and wallpaper. */
 @OptIn(UnstableApi::class)
-class AppContainer(private val app: Application) {
+class AppContainer(
+    private val app: Application,
+    /** Replaces Apple's feeds (UI tests). */
+    private val catalogSource: CatalogSource? = null,
+) {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -50,7 +55,7 @@ class AppContainer(private val app: Application) {
 
     val library by lazy { ClipLibrary(File(app.filesDir, "clips"), json, appScope) }
 
-    val catalog by lazy { CatalogRepository(AppleAerials(http, json, app.cacheDir), appScope) }
+    val catalog by lazy { CatalogRepository(catalogSource ?: AppleAerials(http, json, app.cacheDir), appScope) }
 
     val remoteFiles by lazy { RemoteFiles(http, File(app.cacheDir, "ranges")) }
 

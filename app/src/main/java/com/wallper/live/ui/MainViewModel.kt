@@ -154,7 +154,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         focus: Focus,
         target: WallpaperTarget,
     ) = enqueue(
-        ClipSource.Remote(footage.masterUrl), footage.title, ClipOrigin.Apple, footage.id,
+        ClipSource.of(footage.masterUrl), footage.title, ClipOrigin.Apple, footage.id,
         startMs, loopMs, speed, focus, target,
     )
 

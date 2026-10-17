@@ -27,12 +27,9 @@ class AppleAerials(
     private val http: OkHttpClient,
     private val json: Json,
     private val cacheDir: File,
-) {
+) : CatalogSource {
 
-    /** Merged scenes; [Catalog.complete] is false when one of the feeds could not be read. */
-    class Catalog(val items: List<Footage>, val complete: Boolean)
-
-    suspend fun load(forceRefresh: Boolean): Catalog = withContext(Dispatchers.IO) {
+    override suspend fun load(forceRefresh: Boolean): Catalog = withContext(Dispatchers.IO) {
         coroutineScope {
             val mac = async { runCatching { feed("macos26", forceRefresh) { macResourcesUrl() } }.getOrNull() }
             val tv = async { runCatching { feed("tvos16", forceRefresh) { TV_MANIFEST } }.getOrNull() }

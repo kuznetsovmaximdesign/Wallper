@@ -2,11 +2,8 @@ package com.wallper.live.ui.editor
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,7 +26,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -36,7 +33,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,10 +53,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,11 @@ import com.wallper.live.playback.LoopSpec
 import com.wallper.live.ui.EditorTarget
 import com.wallper.live.ui.MainUiState
 import com.wallper.live.ui.components.GlassSurface
+import com.wallper.live.ui.components.InlineVideo
 import com.wallper.live.ui.components.LoopVideo
+import com.wallper.live.ui.components.TestTags
+import com.wallper.live.ui.components.focusDrag
+import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -114,7 +119,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
     val covers = container.covers
     val motion = container.motionThumbs
     val items = state.visibleFootage.takeIf { list -> list.any { it.id == footage.id } } ?: listOf(footage)
-    val edit = rememberSourceEdit(footage.id, ClipSource.Remote(footage.previewUrl ?: footage.masterUrl))
+    val edit = rememberSourceEdit(footage.id, ClipSource.of(footage.previewUrl ?: footage.masterUrl))
     // Light 1080p stream when Apple has one; otherwise the 4K 240 fps master, played by
     // the layer-dropping decoder at 60/30 fps.
     val preview = footage.previewUrl
@@ -140,7 +145,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
                 VideoPage(
                     spec = if (active) spec else null,
                     still = covers.cached(item) ?: motion.poster(item.id) ?: item.coverUrl,
-                    animateStill = false,
+                    loop = if (active) motion.cached(item.id) else null,
                     state = state,
                     speed = edit.speed,
                     focus = if (active) edit.focus else Focus.Center,
@@ -177,7 +182,9 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
 private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorActions, modifier: Modifier) {
     val clip = state.clips.firstOrNull { it.id == clipId } ?: return
     val context = LocalContext.current
-    val library = remember(context) { (context.applicationContext as WallperApplication).container.library }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val library = container.library
+    val motion = container.motionThumbs
     var speed by remember(clip.id) { mutableFloatStateOf(state.settings.speedOf(clip.id)) }
     var focus by remember(clip.id) { mutableStateOf(state.settings.focusOf(clip.id)) }
     var framing by remember { mutableStateOf(false) }
@@ -213,7 +220,7 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
                         null
                     },
                     still = library.coverOf(item),
-                    animateStill = false,
+                    loop = if (active) motion.cached("clip-${item.id}") else null,
                     state = state,
                     speed = speed,
                     focus = if (active) focus else state.settings.focusOf(item.id),
@@ -259,7 +266,7 @@ private fun DeviceViewer(uri: Uri, state: MainUiState, actions: EditorActions, m
             VideoPage(
                 spec = spec,
                 still = null,
-                animateStill = false,
+                loop = null,
                 state = state,
                 speed = edit.speed,
                 focus = edit.focus,
@@ -336,10 +343,11 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
                 .coerceAtLeast(Playback.MIN_LOOP_MS)
         }
     }
-    // Rebuild the preview only once the fragment stops changing.
+    // The first fragment starts playing at once; later edits rebuild the preview only
+    // once the fragment stops changing.
     LaunchedEffect(key, edit.startMs, edit.loopMs) {
         if (edit.startMs < 0) return@LaunchedEffect
-        delay(250)
+        if (edit.committed != null) delay(250)
         edit.committed = edit.startMs to edit.loopMs
     }
     return edit
@@ -384,18 +392,36 @@ private fun <T> ViewerPager(
     }
 }
 
+/**
+ * One page of the viewer. The real video plays underneath; until it has a picture on
+ * screen, the card's live loop (or a still) covers it, so the viewer moves the instant
+ * it opens and never shows black — not on open, not while the fragment or a setting
+ * rebuilds the player, not after returning to the app.
+ */
 @Composable
 private fun VideoPage(
     spec: LoopSpec?,
     still: Any?,
-    animateStill: Boolean,
+    loop: File?,
     state: MainUiState,
     speed: Float,
     focus: Focus,
     onFocus: ((Focus) -> Unit)?,
 ) {
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (still != null) Still(still, focus, animate = animateStill)
+    var picture by remember(spec != null) { mutableStateOf(false) }
+    val covered = spec == null || !picture
+    val coverAlpha by animateFloatAsState(
+        targetValue = if (covered) 1f else 0f,
+        animationSpec = if (covered) snap() else tween(COVER_FADE_MS),
+        label = "coverAlpha",
+    )
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .focusDrag(focus, onFocus)
+            .testTag(TestTags.VIDEO),
+    ) {
         if (spec != null) {
             LoopVideo(
                 spec = spec,
@@ -403,27 +429,28 @@ private fun VideoPage(
                 speed = speed,
                 focus = focus,
                 frostReveal = false,
-                onFocusChange = onFocus,
+                onPicture = { picture = it },
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+        if (coverAlpha > 0f) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = coverAlpha }) {
+                if (still != null) Still(still, focus)
+                // The 9:16 loop only matches portrait screens; wide ones keep the still.
+                if (loop != null && maxWidth < maxHeight * PORTRAIT_LIMIT) {
+                    InlineVideo(LoopSpec(Uri.fromFile(loop), loopMs = 0, fadeMs = 0))
+                }
+                if (spec != null && loop == null) {
+                    LoadingIndicator(Modifier.align(Alignment.Center), color = Color.White)
+                }
+            }
         }
     }
 }
 
-/** Apple's still; 240 fps scenes drift slowly (Ken Burns) until the 4K clip is prepared. */
+/** A still frame; Apple's small stills are softened instead of showing their pixels. */
 @Composable
-private fun Still(model: Any, focus: Focus, animate: Boolean) {
-    val scale = if (animate) {
-        val transition = rememberInfiniteTransition(label = "kenBurns")
-        transition.animateFloat(
-            initialValue = 1.03f,
-            targetValue = 1.14f,
-            animationSpec = infiniteRepeatable(tween(16_000, easing = LinearEasing), RepeatMode.Reverse),
-            label = "kenBurnsScale",
-        ).value
-    } else {
-        1f
-    }
+private fun Still(model: Any, focus: Focus) {
     AsyncImage(
         model = model,
         contentDescription = null,
@@ -431,10 +458,7 @@ private fun Still(model: Any, focus: Focus, animate: Boolean) {
         alignment = BiasAlignment(focus.x * 2f - 1f, focus.y * 2f - 1f),
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            },
+            .then(if (model is String) Modifier.blur(16.dp) else Modifier),
     )
 }
 
@@ -453,7 +477,7 @@ private fun ViewerFrame(
     dock: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    Box(modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier.fillMaxSize().background(Color.Black).testTag(TestTags.VIEWER)) {
         pager()
 
         // Framing mode is unmistakable: the screen gets a frame, dragging moves the picture.
@@ -473,7 +497,7 @@ private fun ViewerFrame(
             if (page > 0) {
                 RoundGlassButton(
                     onClick = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
-                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp),
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp).testTag(TestTags.PREVIOUS),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.action_previous), tint = Color.White)
                 }
@@ -481,7 +505,7 @@ private fun ViewerFrame(
             if (page < pageCount - 1) {
                 RoundGlassButton(
                     onClick = { scope.launch { pagerState.animateScrollToPage(page + 1) } },
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp),
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp).testTag(TestTags.NEXT),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.action_next), tint = Color.White)
                 }
@@ -514,11 +538,11 @@ private fun ViewerFrame(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             if (onBack != null) {
-                RoundGlassButton(onClick = onBack) {
+                RoundGlassButton(onClick = onBack, modifier = Modifier.testTag(TestTags.BACK)) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Color.White)
                 }
             } else {
-                Spacer(Modifier.size(40.dp))
+                Spacer(Modifier.size(44.dp))
             }
             AnimatedVisibility(framing, enter = fadeIn(), exit = fadeOut()) {
                 GlassSurface(RoundedCornerShape(50)) {
@@ -531,11 +555,11 @@ private fun ViewerFrame(
                 }
             }
             if (onDelete != null) {
-                RoundGlassButton(onClick = onDelete) {
+                RoundGlassButton(onClick = onDelete, modifier = Modifier.testTag(TestTags.DELETE)) {
                     Icon(Icons.Filled.Delete, stringResource(R.string.action_delete), tint = Color.White)
                 }
             } else {
-                Spacer(Modifier.size(40.dp))
+                Spacer(Modifier.size(44.dp))
             }
         }
 
@@ -553,18 +577,31 @@ private fun ViewerFrame(
                 if (caption.isNotEmpty()) {
                     Text(caption, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.75f))
                 }
-                Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = Color.White,
+                    modifier = Modifier.testTag(TestTags.TITLE),
+                )
             }
             dock()
         }
     }
 }
 
+/** Expressive tonal icon button (its corners morph when pressed), tinted for video. */
 @Composable
 private fun RoundGlassButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    GlassSurface(CircleShape, modifier.size(40.dp)) {
-        IconButton(onClick = onClick, modifier = Modifier.fillMaxSize()) { content() }
-    }
+    FilledTonalIconButton(
+        onClick = onClick,
+        shapes = IconButtonDefaults.shapes(),
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = Color.Black.copy(alpha = 0.42f),
+            contentColor = Color.White,
+        ),
+        modifier = modifier.size(44.dp),
+        content = content,
+    )
 }
 
 /** Shown once per app session, then fades away. */
@@ -591,3 +628,6 @@ private fun SwipeHint(modifier: Modifier) {
 private var swipeHintShown = false
 
 // endregion
+
+private const val COVER_FADE_MS = 320
+private const val PORTRAIT_LIMIT = 0.8f

@@ -25,6 +25,8 @@ import com.wallper.live.core.Focus
 import com.wallper.live.playback.LoopRenderer
 import com.wallper.live.playback.LoopSession
 import com.wallper.live.playback.LoopSpec
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** GLSurfaceView hosting a [LoopRenderer]: the same pipeline the wallpaper uses. */
 @SuppressLint("ViewConstructor")
@@ -53,22 +55,35 @@ fun LoopVideo(
     frostReveal: Boolean = false,
     revealKey: Any? = null,
     onFocusChange: ((Focus) -> Unit)? = null,
+    /** True while a video picture is on screen; false while the surface is still black. */
+    onPicture: ((Boolean) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val container = remember(context) { (context.applicationContext as WallperApplication).container }
     val view = remember(context) { LoopVideoView(context) }
     var session by remember { mutableStateOf<LoopSession?>(null) }
 
-    DisposableEffect(spec, seamless) {
+    // A new spec (fragment, loop setting…) gets a new session, but the current one keeps
+    // playing until the new one is ready, so the picture never stops or goes black.
+    LaunchedEffect(spec, seamless) {
         val created = spec?.let { container.newLoopSession(it, seamless) }
-        created?.attach(view.renderer.target)
-        session = created
-        onDispose {
-            created?.detach(view.renderer.target)
-            created?.release()
+        var swapped = false
+        try {
+            val previous = session
+            if (created != null && previous != null && spec?.highFrameRate != true) {
+                withTimeoutOrNull(SWAP_WAIT_MS) { while (!created.isReady) delay(SWAP_POLL_MS) }
+            }
+            previous?.let {
+                it.detach(view.renderer.target)
+                it.release()
+            }
+            created?.attach(view.renderer.target)
+            session = created
+            swapped = true
+        } finally {
+            if (!swapped) created?.release()
         }
     }
-
     LaunchedEffect(session, speed) { session?.speed = speed }
 
     // Replays the frosted-glass reveal, e.g. when the preview switches lock → home.
@@ -83,42 +98,58 @@ fun LoopVideo(
         view.requestRender()
     }
 
-    LifecycleResumeEffect(view, session) {
+    LifecycleResumeEffect(view) {
         view.onResume()
-        session?.play()
-        onPauseOrDispose {
-            session?.pause()
-            view.onPause()
+        onPauseOrDispose { view.onPause() }
+    }
+    LifecycleResumeEffect(session) {
+        val current = session
+        current?.play()
+        onPauseOrDispose { current?.pause() }
+    }
+
+    val pictureCallback by rememberUpdatedState(onPicture)
+    DisposableEffect(view) {
+        view.renderer.onPictureChanged = { pictureCallback?.invoke(it) }
+        onDispose {
+            session?.let {
+                it.detach(view.renderer.target)
+                it.release()
+            }
+            session = null
+            view.renderer.onPictureChanged = null
+            view.renderer.release()
         }
     }
 
-    DisposableEffect(view) {
-        onDispose { view.renderer.release() }
+    Box(modifier.focusDrag(focus, onFocusChange)) {
+        AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
     }
+}
 
+/**
+ * Dragging moves the [focus] point (re-framing). Applied on a parent, it keeps working
+ * while stills or loops are layered above the video.
+ */
+@Composable
+fun Modifier.focusDrag(focus: Focus, onFocusChange: ((Focus) -> Unit)?): Modifier {
     val currentFocus by rememberUpdatedState(focus)
     val focusCallback by rememberUpdatedState(onFocusChange)
-    val dragModifier = if (onFocusChange == null) {
-        Modifier
-    } else {
-        Modifier.pointerInput(Unit) {
-            detectDragGestures { change, drag ->
-                change.consume()
-                val f = currentFocus
-                focusCallback?.invoke(
-                    Focus(
-                        x = (f.x - drag.x / size.width * DRAG_GAIN).coerceIn(0f, 1f),
-                        y = (f.y - drag.y / size.height * DRAG_GAIN).coerceIn(0f, 1f),
-                    ),
-                )
-            }
+    if (onFocusChange == null) return this
+    return pointerInput(Unit) {
+        detectDragGestures { change, drag ->
+            change.consume()
+            val f = currentFocus
+            focusCallback?.invoke(
+                Focus(
+                    x = (f.x - drag.x / size.width * DRAG_GAIN).coerceIn(0f, 1f),
+                    y = (f.y - drag.y / size.height * DRAG_GAIN).coerceIn(0f, 1f),
+                ),
+            )
         }
-    }
-
-    Box(modifier) {
-        AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
-        Box(Modifier.matchParentSize().then(dragModifier))
     }
 }
 
 private const val DRAG_GAIN = 1.6f
+private const val SWAP_WAIT_MS = 1_500L
+private const val SWAP_POLL_MS = 25L

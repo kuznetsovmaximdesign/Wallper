@@ -9,3 +9,5 @@
 .externalNativeBuild/
 .cxx/
 .kotlin/
+# Test videos are generated in CI (scripts/make-test-videos.sh).
+/app/src/androidTest/assets/videos/

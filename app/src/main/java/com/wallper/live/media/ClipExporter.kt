@@ -19,6 +19,12 @@ import kotlinx.coroutines.withContext
 sealed interface ClipSource {
     data class Remote(val url: String) : ClipSource
     data class Local(val uri: Uri) : ClipSource
+
+    companion object {
+        /** HTTP(S) URLs go through the range cache; anything else is opened directly. */
+        fun of(url: String): ClipSource =
+            if (url.startsWith("http://") || url.startsWith("https://")) Remote(url) else Local(Uri.parse(url))
+    }
 }
 
 data class ExportedClip(
