@@ -20,7 +20,11 @@ object Screen {
     private const val DARK_LUMA = 20.0
 
     data class Stats(val luma: Double, val spread: Double, val darkShare: Double) {
-        val hasPicture: Boolean get() = darkShare < 0.6 && spread > 10.0
+        /**
+         * The app's own chrome is near-black, so a vanished video reads as dark. A zoomed
+         * video can be one flat colour (low spread), which is still a picture.
+         */
+        val hasPicture: Boolean get() = darkShare < 0.6 && (spread > 10.0 || luma > 3 * DARK_LUMA)
         override fun toString() = "luma=%.1f spread=%.1f dark=%.2f".format(luma, spread, darkShare)
     }
 

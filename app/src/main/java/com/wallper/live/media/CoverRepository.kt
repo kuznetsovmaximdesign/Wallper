@@ -1,7 +1,10 @@
 package com.wallper.live.media
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.net.Uri
+import android.util.Log
 import com.wallper.live.core.Footage
 import java.io.File
 import java.io.FileOutputStream
@@ -18,6 +21,7 @@ import kotlinx.coroutines.withContext
  * Apple's published stills are small, so they only serve as instant placeholders.
  */
 class CoverRepository(
+    private val context: Context,
     private val remote: RemoteFiles,
     private val directory: File,
 ) {
@@ -34,7 +38,9 @@ class CoverRepository(
         val result = permits.withPermit {
             // The 4K master gives the sharpest frame; the 1080p stream is the fallback.
             listOfNotNull(footage.masterUrl, footage.previewUrl).distinct().firstNotNullOfOrNull { url ->
-                runCatching { render(footage, url) }.getOrNull()
+                runCatching { render(footage, url) }
+                    .onFailure { Log.w(TAG, "cover of ${footage.id} failed", it) }
+                    .getOrNull()
             }
         }
         deferred.complete(result)
@@ -45,7 +51,7 @@ class CoverRepository(
     private suspend fun render(footage: Footage, url: String): File? = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(remote.open(url))
+            if (url.startsWith("http")) retriever.setDataSource(remote.open(url)) else retriever.setDataSource(context, Uri.parse(url))
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
                 ?: 60_000L
             val frame = retriever.getScaledFrameAtTime(
@@ -69,6 +75,7 @@ class CoverRepository(
     private fun fileOf(footage: Footage) = File(directory, "v2-${footage.id}.jpg")
 
     private companion object {
+        const val TAG = "WallperCovers"
         const val PARALLEL = 2
         const val MAX_SIDE = 2560
     }

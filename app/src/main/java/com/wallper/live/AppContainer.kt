@@ -59,7 +59,7 @@ class AppContainer(
 
     val remoteFiles by lazy { RemoteFiles(http, File(app.cacheDir, "ranges")) }
 
-    val covers by lazy { CoverRepository(remoteFiles, File(app.cacheDir, "covers")) }
+    val covers by lazy { CoverRepository(app, remoteFiles, File(app.cacheDir, "covers")) }
 
     val motionThumbs by lazy { MotionThumbnails(app, remoteFiles, File(app.cacheDir, "motion")) }
 

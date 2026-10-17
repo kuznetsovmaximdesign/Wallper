@@ -47,9 +47,10 @@ class GalleryTest {
     fun settingsKeepTheGalleryPlaying() {
         Screen.awaitMoving({ app.cardArea(SCENE_A) }, START_TIMEOUT_MS, "hero before settings")
         app.tap(TestTags.SETTINGS)
-        for (name in listOf("frost", "seamless", "parallax", "battery")) {
-            app.tap(TestTags.setting(name))
-            app.tap(TestTags.setting(name)) // and back to how it was
+        val rows = listOf(R.string.settings_frost, R.string.editor_loop, R.string.settings_parallax, R.string.settings_battery)
+        for (row in rows.map(app::string)) {
+            app.tapText(row)
+            app.tapText(row) // and back to how it was
         }
         app.back()
         SystemClock.sleep(600)

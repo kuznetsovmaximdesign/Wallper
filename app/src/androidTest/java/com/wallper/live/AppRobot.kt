@@ -66,6 +66,28 @@ class AppRobot {
         dialog.click()
     }
 
+    /** The most visible of several elements with [tag] (pager pages next to the current one share it). */
+    fun findVisible(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
+        find(tag, timeoutMs)
+        return device.findObjects(By.res(tag)).maxByOrNull { it.visibleBounds.width() * it.visibleBounds.height() } ?: find(tag)
+    }
+
+    /** Taps the element showing [text], waiting for it like [find]. */
+    fun tapText(text: String) {
+        val deadline = SystemClock.elapsedRealtime() + UI_TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            device.findObject(By.text(text))?.let {
+                it.click()
+                SystemClock.sleep(SETTLE_MS)
+                return
+            }
+            SystemClock.sleep(250)
+        }
+        fail("No '$text' on screen (in front: ${device.currentPackageName})")
+    }
+
+    fun string(id: Int): String = instrumentation.targetContext.getString(id)
+
     fun exists(tag: String, timeoutMs: Long = 1_000): Boolean = device.wait(Until.hasObject(By.res(tag)), timeoutMs)
 
     fun tap(tag: String) {
@@ -91,7 +113,7 @@ class AppRobot {
     }
 
     /** The visible middle of the viewer's video. */
-    fun videoArea(): Rect = Screen.middle(find(TestTags.VIDEO).visibleBounds)
+    fun videoArea(): Rect = Screen.middle(findVisible(TestTags.VIDEO).visibleBounds)
 
     fun cardArea(id: String): Rect {
         val b = find(TestTags.card(id)).visibleBounds
@@ -101,7 +123,7 @@ class AppRobot {
     fun title(): String = find(TestTags.TITLE).text.orEmpty()
 
     fun swipeVideo(towardsLeft: Boolean) {
-        val b = find(TestTags.VIDEO).visibleBounds
+        val b = findVisible(TestTags.VIDEO).visibleBounds
         val y = b.centerY()
         val (from, to) = if (towardsLeft) b.right - b.width() / 8 to b.left + b.width() / 8 else b.left + b.width() / 8 to b.right - b.width() / 8
         device.swipe(from, y, to, y, 25)
@@ -109,7 +131,7 @@ class AppRobot {
     }
 
     fun dragVideo() {
-        val b = find(TestTags.VIDEO).visibleBounds
+        val b = findVisible(TestTags.VIDEO).visibleBounds
         device.drag(b.centerX(), b.centerY(), b.centerX() - b.width() / 4, b.centerY() + b.height() / 10, 30)
         SystemClock.sleep(SETTLE_MS)
     }

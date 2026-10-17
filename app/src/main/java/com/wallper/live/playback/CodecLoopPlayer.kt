@@ -7,6 +7,7 @@ import android.media.MediaFormat
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.util.Log
 import android.view.Surface
 import com.wallper.live.media.HevcTemporalLayers
 import com.wallper.live.media.RemoteFiles
@@ -62,6 +63,7 @@ class CodecLoopPlayer(
     private val heldInfo = MediaCodec.BufferInfo()
     private var anchorNanos = 0L
     private var anchorUs = 0L
+    private var lastRenderNanos = 0L
     private var firstFramePending = true
 
     private val startUs = spec.clipStartMs * 1000
@@ -255,6 +257,7 @@ class CodecLoopPlayer(
                 firstFramePending = false
                 positionUs = relativeUs
                 reanchor()
+                lastRenderNanos = anchorNanos
                 if (!ready) {
                     ready = true
                     main.post { listener?.onFirstFrame() }
@@ -272,8 +275,19 @@ class CodecLoopPlayer(
                     hold(index, info)
                     return
                 }
-                now - due > LATE_NANOS -> decoder.releaseOutputBuffer(index, false)
-                else -> decoder.releaseOutputBuffer(index, due)
+                now - due > LATE_NANOS && now - lastRenderNanos < MAX_STALL_NANOS -> decoder.releaseOutputBuffer(index, false)
+                now - due > LATE_NANOS -> {
+                    // The decoder cannot keep up: show this picture now and let the clock
+                    // follow, so a slow device plays slower instead of freezing on one frame.
+                    decoder.releaseOutputBuffer(index, true)
+                    lastRenderNanos = now
+                    anchorNanos = now
+                    anchorUs = relativeUs
+                }
+                else -> {
+                    decoder.releaseOutputBuffer(index, due)
+                    lastRenderNanos = due
+                }
             }
             heldOutput = -1
             positionUs = relativeUs
@@ -308,6 +322,7 @@ class CodecLoopPlayer(
     }
 
     private fun fail(error: Throwable) {
+        Log.w(TAG, "playback failed", error)
         playing = false
         runCatching { codec?.stop() }
         runCatching { codec?.release() }
@@ -327,10 +342,13 @@ class CodecLoopPlayer(
     // endregion
 
     private companion object {
+        const val TAG = "WallperCodec"
         const val TICK_MS = 4L
         const val IDLE_TICK_MS = 30L
         const val MAX_FEED_PER_TICK = 8
         const val EARLY_NANOS = 40_000_000L
         const val LATE_NANOS = 60_000_000L
+        /** Longest a late decoder may hold the same picture on screen. */
+        const val MAX_STALL_NANOS = 120_000_000L
     }
 }

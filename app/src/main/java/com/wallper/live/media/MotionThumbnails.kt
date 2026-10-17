@@ -20,6 +20,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Log
 import android.view.Surface
 import java.io.File
 import java.io.FileOutputStream
@@ -62,7 +63,11 @@ class MotionThumbnails(
         if (existing != null) return existing.await()
         try {
             val result = withContext(dispatcher) {
-                runCatching { generate(uri, fileOf(id), posterOf(id)) }.getOrNull()
+                val began = System.nanoTime()
+                runCatching { generate(uri, fileOf(id), posterOf(id)) }
+                    .onSuccess { Log.i(TAG, "$id ready in ${(System.nanoTime() - began) / 1_000_000}ms") }
+                    .onFailure { Log.w(TAG, "$id failed", it) }
+                    .getOrNull()
             }
             deferred.complete(result)
             return result
@@ -254,6 +259,7 @@ class MotionThumbnails(
     }
 
     private companion object {
+        const val TAG = "WallperMotion"
         const val PARALLEL = 2
         const val WIDTH = 576
         const val HEIGHT = 1024
