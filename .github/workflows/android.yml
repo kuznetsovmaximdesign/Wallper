@@ -109,6 +109,12 @@ jobs:
             exit 1
           }
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/local/lib/android/sdk/ndk /usr/share/swift "$AGENT_TOOLSDIRECTORY/PyPy" || true
+          df -h "$HOME" | tail -1
+
       - name: Start emulator
         run: |
           sdk="$ANDROID_HOME"
@@ -120,9 +126,11 @@ jobs:
             -k "system-images;android-34;google_apis;x86_64" -d pixel_7
           printf 'hw.ramSize=4096\ndisk.dataPartition.size=6G\nhw.gpu.enabled=yes\nhw.gpu.mode=swiftshader_indirect\n' >> "$ANDROID_AVD_HOME/test.avd/config.ini"
           nohup "$sdk/emulator/emulator" -avd test -no-window -no-snapshot -noaudio -no-boot-anim \
-            -camera-back none -gpu swiftshader_indirect -accel on > emulator.log 2>&1 &
+            -camera-back none -gpu swiftshader_indirect -accel on -partition-size 3072 > emulator.log 2>&1 &
+          emulator_pid=$!
           adb="$sdk/platform-tools/adb"
           for i in $(seq 1 180); do
+            kill -0 "$emulator_pid" 2>/dev/null || break # the emulator exited: show why right away
             if [ "$($adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then booted=1; break; fi
             sleep 5
           done
