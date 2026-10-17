@@ -2,13 +2,16 @@
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
     <!--
-      Apple's Aerials CDN (sylvan.apple.com) omits its intermediate certificate.
-      AiaTrustManager completes the chain by downloading the issuer from the URL in the
-      leaf's Authority Information Access extension. Those URLs are plain HTTP by design
-      (RFC 5280 §4.2.2.1); the downloaded certificate is authenticated by its signature
-      against the system roots, so cleartext is allowed only for Apple's cert host.
+      Apple's Aerials CDN (sylvan.apple.com) serves a chain that ends in "Apple Root CA",
+      which is not part of the Android system store. Trust that public root (bundled,
+      SHA-256 B0:B1:73:0E:CB:C7:FF:45:05:14:2C:49:F1:29:5E:6E:DA:6B:CA:ED:7E:2C:68:C5:BE:91:B5:A1:10:01:F0:24)
+      for this host only; verification and hostname checks stay fully enabled.
     -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">certs.apple.com</domain>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">sylvan.apple.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/apple_root_ca" />
+        </trust-anchors>
     </domain-config>
 </network-security-config>
