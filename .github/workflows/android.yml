@@ -124,7 +124,7 @@ jobs:
           "$sdk/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "system-images;android-34;google_apis;x86_64" > /dev/null
           echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd --force -n test \
             -k "system-images;android-34;google_apis;x86_64" -d pixel_7
-          printf 'hw.ramSize=4096\ndisk.dataPartition.size=6G\nhw.gpu.enabled=yes\nhw.gpu.mode=swiftshader_indirect\n' >> "$ANDROID_AVD_HOME/test.avd/config.ini"
+          printf 'hw.ramSize=4096\ndisk.dataPartition.size=3G\nhw.gpu.enabled=yes\nhw.gpu.mode=swiftshader_indirect\n' >> "$ANDROID_AVD_HOME/test.avd/config.ini"
           nohup "$sdk/emulator/emulator" -avd test -no-window -no-snapshot -noaudio -no-boot-anim \
             -camera-back none -gpu swiftshader_indirect -accel on -partition-size 3072 > emulator.log 2>&1 &
           emulator_pid=$!
