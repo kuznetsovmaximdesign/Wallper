@@ -310,7 +310,7 @@ class MotionThumbnails(
         const val TICK_US = 10_000L
         const val FRAME_WAIT_MS = 2_500L
         const val FRAME_US = 1_000_000L / FPS
-        const val STALL_NANOS = 20_000_000_000L
+        const val STALL_NANOS = 60_000_000_000L
         const val HOLD_POLL_MS = 50L
         const val RETRY_AFTER_MS = 3 * 60_000L
     }

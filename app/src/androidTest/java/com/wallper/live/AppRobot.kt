@@ -10,10 +10,12 @@ import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Configurator
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import com.wallper.live.ui.components.TestTags
+import java.util.regex.Pattern
 import org.junit.Assert.fail
 
 /** Drives the real app through UI Automator: taps, swipes and waits like a person would. */
@@ -34,6 +36,8 @@ class AppRobot {
         val intent = instrumentation.targetContext.packageManager.getLaunchIntentForPackage(packageName)!!
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         instrumentation.targetContext.startActivity(intent)
+        // Right after boot the system can swallow the first launch; ask once more.
+        if (!exists(TestTags.GRID, LAUNCH_TIMEOUT_MS / 2)) instrumentation.targetContext.startActivity(intent)
         find(TestTags.GRID, LAUNCH_TIMEOUT_MS)
     }
 
@@ -72,8 +76,26 @@ class AppRobot {
     /** The most visible of several elements with [tag] (pager pages next to the current one share it). */
     fun findVisible(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
         find(tag, timeoutMs)
-        return device.findObjects(By.res(tag)).maxByOrNull { it.visibleBounds.width() * it.visibleBounds.height() } ?: find(tag)
+        return device.findObjects(By.res(tag))
+            .mapNotNull { element -> runCatching { element to element.visibleBounds }.getOrNull() }
+            .maxByOrNull { (_, b) -> b.width() * b.height() }?.first ?: find(tag)
     }
+
+    /** Runs [action] on a freshly found element, again if the UI recomposed under it. */
+    private fun <T> fresh(lookup: () -> UiObject2, action: (UiObject2) -> T): T {
+        repeat(STALE_RETRIES) {
+            try {
+                return action(lookup())
+            } catch (_: StaleObjectException) {
+                SystemClock.sleep(150)
+            }
+        }
+        return action(lookup())
+    }
+
+    fun bounds(tag: String): Rect = fresh({ find(tag) }) { it.visibleBounds }
+
+    private fun visibleBounds(tag: String): Rect = fresh({ findVisible(tag) }) { it.visibleBounds }
 
     /**
      * Taps the element whose text starts with [text], waiting for it like [find]. A row
@@ -82,8 +104,10 @@ class AppRobot {
     fun tapText(text: String) {
         val deadline = SystemClock.elapsedRealtime() + UI_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
-            device.findObject(By.textStartsWith(text))?.let {
-                it.click()
+            // DOTALL: a merged row's text spans lines (title, then hint).
+            val match = By.text(Pattern.compile(Pattern.quote(text) + ".*", Pattern.DOTALL))
+            val found = device.findObject(match)
+            if (found != null && runCatching { found.click() }.isSuccess) {
                 SystemClock.sleep(SETTLE_MS)
                 return
             }
@@ -95,10 +119,13 @@ class AppRobot {
 
     fun string(id: Int): String = instrumentation.targetContext.getString(id)
 
-    fun exists(tag: String, timeoutMs: Long = 1_000): Boolean = device.wait(Until.hasObject(By.res(tag)), timeoutMs)
+    fun exists(tag: String, timeoutMs: Long = 1_000): Boolean {
+        reportViewIds()
+        return device.wait(Until.hasObject(By.res(tag)), timeoutMs)
+    }
 
     fun tap(tag: String) {
-        find(tag).click()
+        fresh({ find(tag) }) { it.click() }
         SystemClock.sleep(SETTLE_MS)
     }
 
@@ -107,7 +134,7 @@ class AppRobot {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
             reportViewIds()
-            val found = device.findObject(By.res(java.util.regex.Pattern.compile(pattern)))
+            val found = device.findObject(By.res(Pattern.compile(pattern)))
             if (found != null && runCatching { found.click() }.isSuccess) {
                 SystemClock.sleep(SETTLE_MS)
                 return true
@@ -131,7 +158,8 @@ class AppRobot {
     /** Scrolls the gallery until [tag] is on screen. */
     fun scrollTo(tag: String): UiObject2 {
         repeat(6) {
-            device.findObject(By.res(tag))?.takeIf { it.visibleBounds.height() > 40 }?.let { return it }
+            reportViewIds()
+            device.findObject(By.res(tag))?.takeIf { runCatching { it.visibleBounds.height() > 40 }.getOrDefault(false) }?.let { return it }
             val x = device.displayWidth / 2
             device.swipe(x, device.displayHeight * 3 / 4, x, device.displayHeight / 3, 30)
             SystemClock.sleep(SETTLE_MS)
@@ -140,24 +168,24 @@ class AppRobot {
     }
 
     fun openFootage(id: String) {
-        scrollTo(TestTags.card(id)).click()
+        fresh({ scrollTo(TestTags.card(id)) }) { it.click() }
         find(TestTags.VIEWER)
         SystemClock.sleep(SETTLE_MS)
     }
 
     /** The visible middle of the viewer's video. */
-    fun videoArea(): Rect = Screen.middle(findVisible(TestTags.VIDEO).visibleBounds)
+    fun videoArea(): Rect = Screen.middle(visibleBounds(TestTags.VIDEO))
 
     fun cardArea(id: String): Rect {
-        val b = find(TestTags.card(id)).visibleBounds
+        val b = bounds(TestTags.card(id))
         return Rect(b.left + b.width() / 6, b.top + b.height() / 8, b.right - b.width() / 6, b.top + b.height() / 2)
     }
 
-    fun title(): String = find(TestTags.TITLE).text.orEmpty()
+    fun title(): String = fresh({ find(TestTags.TITLE) }) { it.text.orEmpty() }
 
     /** A deliberate horizontal swipe, above the paging arrows at the sides' centre. */
     fun swipeVideo(towardsLeft: Boolean) {
-        val b = findVisible(TestTags.VIDEO).visibleBounds
+        val b = visibleBounds(TestTags.VIDEO)
         val y = b.top + b.height() * 3 / 10
         val right = b.right - b.width() * 3 / 10
         val left = b.left + b.width() / 10
@@ -167,14 +195,14 @@ class AppRobot {
     }
 
     fun dragVideo() {
-        val b = findVisible(TestTags.VIDEO).visibleBounds
+        val b = visibleBounds(TestTags.VIDEO)
         device.drag(b.centerX(), b.centerY(), b.centerX() - b.width() / 4, b.centerY() + b.height() / 10, 30)
         SystemClock.sleep(SETTLE_MS)
     }
 
     /** Drags a slider's thumb area by [fraction] of its width. */
     fun dragSlider(tag: String, fraction: Float) {
-        val b = find(tag).visibleBounds
+        val b = bounds(tag)
         val y = b.centerY()
         val from = b.left + b.width() / 3
         device.drag(from, y, (from + b.width() * fraction).toInt(), y, 25)
@@ -212,5 +240,6 @@ class AppRobot {
         const val LAUNCH_TIMEOUT_MS = 30_000L
         const val UI_TIMEOUT_MS = 10_000L
         const val SETTLE_MS = 400L
+        const val STALE_RETRIES = 5
     }
 }
