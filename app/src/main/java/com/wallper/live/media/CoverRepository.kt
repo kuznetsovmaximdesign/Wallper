@@ -31,20 +31,20 @@ class CoverRepository(
         val deferred = CompletableDeferred<File?>()
         val existing = inFlight.putIfAbsent(footage.id, deferred)
         if (existing != null) return existing.await()
-        val result = try {
-            permits.withPermit { render(footage) }
-        } catch (_: Exception) {
-            null
+        val result = permits.withPermit {
+            listOf(footage.previewUrl, footage.masterUrl).distinct().firstNotNullOfOrNull { url ->
+                runCatching { render(footage, url) }.getOrNull()
+            }
         }
         deferred.complete(result)
         inFlight.remove(footage.id)
         return result
     }
 
-    private suspend fun render(footage: Footage): File? = withContext(Dispatchers.IO) {
+    private suspend fun render(footage: Footage, url: String): File? = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(HttpMediaDataSource(http, footage.previewUrl))
+            retriever.setDataSource(HttpMediaDataSource(http, url))
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
                 ?: 60_000L
             val frame = retriever.getScaledFrameAtTime(

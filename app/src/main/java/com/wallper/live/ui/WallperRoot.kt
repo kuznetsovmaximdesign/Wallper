@@ -113,12 +113,11 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
                         actionLabel = event.actionLabel?.let(context::getString),
                         duration = if (event.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
                     )
-                    when (val action = event.action) {
-                        UiAction.OpenPicker -> if (result == SnackbarResult.ActionPerformed) openPicker()
-                        is UiAction.UndoDelete ->
-                            if (result == SnackbarResult.ActionPerformed) vm.undoDelete(action.clipId)
-                            else vm.commitDelete(action.clipId)
-                        null -> Unit
+                    val action = event.action
+                    val accepted = result == SnackbarResult.ActionPerformed
+                    if (action is UiAction.OpenPicker && accepted) openPicker()
+                    if (action is UiAction.UndoDelete) {
+                        if (accepted) vm.undoDelete(action.clipId) else vm.commitDelete(action.clipId)
                     }
                 }
             }

@@ -90,7 +90,7 @@ class PlaybackHub(
                     pauseOnPowerSave = s.pauseOnPowerSave,
                     powerSave = saving,
                 )
-            }.distinctUntilChanged().collect(::apply)
+            }.distinctUntilChanged().collect { apply(it) }
         }
     }
 

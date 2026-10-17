@@ -115,7 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         container.catalog.refresh()
-        viewModelScope.launch { container.exports.jobs.collect(::onJobs) }
+        viewModelScope.launch { container.exports.jobs.collect { onJobs(it) } }
     }
 
     fun selectTab(value: HomeTab) = tab.update { value }

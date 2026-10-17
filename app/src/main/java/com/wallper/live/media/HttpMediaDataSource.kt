@@ -60,30 +60,30 @@ class HttpMediaDataSource(
 
     private fun fetchLength(): Long {
         val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
-        retrying {
+        return retrying {
             http.newCall(request).execute().use { response ->
-                val total = response.header("Content-Range")?.substringAfter('/')?.toLongOrNull()
+                response.header("Content-Range")?.substringAfter('/')?.toLongOrNull()
                     ?: response.header("Content-Length")?.toLongOrNull()?.takeIf { response.code == 200 }
-                return total ?: throw IOException("Unknown length (HTTP ${response.code})")
+                    ?: throw IOException("Unknown length (HTTP ${response.code})")
             }
         }
     }
 
     private fun fetchRange(start: Long, end: Long): ByteArray {
         val request = Request.Builder().url(url).header("Range", "bytes=$start-$end").build()
-        retrying {
+        return retrying {
             http.newCall(request).execute().use { response ->
                 if (response.code != 206) throw IOException("Range not supported (HTTP ${response.code})")
                 val bytes = response.body?.bytes() ?: throw IOException("Empty body")
                 if (bytes.size.toLong() != end - start + 1) throw IOException("Short read")
-                return bytes
+                bytes
             }
         }
     }
 
-    private inline fun <T> retrying(block: () -> T): T {
+    private fun <T> retrying(block: () -> T): T {
         var last: IOException? = null
-        repeat(ATTEMPTS) { attempt ->
+        for (attempt in 0 until ATTEMPTS) {
             try {
                 return block()
             } catch (e: IOException) {
