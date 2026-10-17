@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Surface
+import com.wallper.live.core.PanelKind
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -18,7 +19,13 @@ import kotlin.math.abs
  *  - cover-crops the video to any surface aspect (phone, foldable inner screen, tablet),
  *  - positions the crop by a user-chosen focus point plus launcher parallax,
  *  - cross-fades the back layer over the front one to hide the loop seam,
- *  - dithers the output so 10-bit skies do not band on 8-bit panels.
+ *  - dithers the output so 10-bit skies do not band on 8-bit panels,
+ *  - optionally "defrosts" the picture when the wallpaper appears (wake, unlock,
+ *    unfold): it starts as frosted glass and resolves to the sharp video,
+ *  - on foldables, follows the hinge like iPhone Duo: each half of the inner panel is
+ *    a pane of frosted glass hinged at the crease (blurrier and darker towards its far
+ *    edge, slightly bent in perspective) that clears as the phone opens flat; the cover
+ *    panel frosts over during the first degrees of opening.
  *
  * GL work happens on the GLSurfaceView thread; [target] is touched on the main thread.
  */
@@ -35,7 +42,33 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     @Volatile private var parallaxTarget = 0f
     private var parallax = 0f
 
+    @Volatile var revealEnabled = false
+
+    /** Panel this renderer draws on; only foldable panels react to the hinge. */
+    @Volatile var panel = PanelKind.Regular
+
+    /** True when the crease runs vertically on screen (the natural orientation). */
+    @Volatile var creaseVertical = true
+
+    /** Latest hinge angle in degrees (180 = flat/open, 0 = closed). */
+    @Volatile private var hingeTarget = 180f
+    private var hinge = 180f
+    private var lastFrameNanos = 0L
+    @Volatile private var revealRequested = false
+    private var revealStartNanos = 0L
+    private var frost = 0f
+
     private var program = 0
+    private var frostProgram = 0
+    private var uFrostTex = 0
+    private var uFrostAmount = 0
+    private var uFrostTexel = 0
+    private var uFrostFold = 0
+    private var uFrostCrease = 0
+    private val frostFbo = IntArray(1)
+    private val frostTex = IntArray(1)
+    private var frostWidth = 0
+    private var frostHeight = 0
     private var uTex = IntArray(2)
     private var uSt = IntArray(2)
     private var uScale = 0
@@ -71,6 +104,21 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         }
     }
 
+    /**
+     * Plays the frosted-glass reveal: the next frames start fully frosted and resolve
+     * to the sharp picture. Ignored when [revealEnabled] is off.
+     */
+    fun reveal() {
+        if (!revealEnabled) return
+        revealRequested = true
+        requestRender()
+    }
+
+    fun setHingeAngle(degrees: Float) {
+        hingeTarget = degrees.coerceIn(0f, 180f)
+        requestRender()
+    }
+
     /** Launcher page offset, -0.5 (first page) .. 0.5 (last page). */
     fun setParallax(offset: Float) {
         parallaxTarget = offset.coerceIn(-0.5f, 0.5f)
@@ -79,7 +127,7 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         releaseTextures()
-        program = buildProgram()
+        program = buildProgram(FRAGMENT)
         uTex[0] = GLES30.glGetUniformLocation(program, "uTex0")
         uTex[1] = GLES30.glGetUniformLocation(program, "uTex1")
         uSt[0] = GLES30.glGetUniformLocation(program, "uSt0")
@@ -87,6 +135,15 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         uScale = GLES30.glGetUniformLocation(program, "uScale")
         uOffset = GLES30.glGetUniformLocation(program, "uOffset")
         uMix = GLES30.glGetUniformLocation(program, "uMix")
+
+        frostProgram = buildProgram(FROST_FRAGMENT)
+        uFrostTex = GLES30.glGetUniformLocation(frostProgram, "uFrostTex")
+        uFrostAmount = GLES30.glGetUniformLocation(frostProgram, "uAmount")
+        uFrostTexel = GLES30.glGetUniformLocation(frostProgram, "uTexel")
+        uFrostFold = GLES30.glGetUniformLocation(frostProgram, "uFold")
+        uFrostCrease = GLES30.glGetUniformLocation(frostProgram, "uCrease")
+        frostWidth = 0
+        frostHeight = 0
 
         GLES30.glGenTextures(2, textures, 0)
         val created = ArrayList<Surface>(2)
@@ -159,6 +216,39 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         // Parallax pans across the spare width (most of it on portrait phones).
         val fx = (focusX + parallax * PARALLAX_RANGE).coerceIn(0f, 1f)
         val fy = 1f - focusY // GL texture space grows upwards
+        updateFrost(hasFrame[f])
+        val fold = updateFold()
+        if ((frost > 0f || fold > FOLD_EPSILON) && frostProgram != 0 && ensureFrostTarget()) {
+            // Pass 1: the sharp composite into a mip-mapped texture.
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, frostFbo[0])
+            GLES30.glViewport(0, 0, frostWidth, frostHeight)
+            drawVideo(f, b, scaleX, scaleY, fx, fy)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, frostTex[0])
+            GLES30.glGenerateMipmap(GLES30.GL_TEXTURE_2D)
+            // Pass 2: sample a blurrier mip level the more frosted the glass is.
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            GLES30.glViewport(0, 0, width, height)
+            GLES30.glUseProgram(frostProgram)
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0)
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, frostTex[0])
+            GLES30.glUniform1i(uFrostTex, 0)
+            GLES30.glUniform1f(uFrostAmount, frost)
+            GLES30.glUniform2f(uFrostTexel, 1f / frostWidth, 1f / frostHeight)
+            GLES30.glUniform1f(uFrostFold, fold)
+            // x: 0 = uniform frost (cover), 1 = hinged halves (inner); y: crease vertical?
+            GLES30.glUniform2f(
+                uFrostCrease,
+                if (panel == PanelKind.Inner) 1f else 0f,
+                if (creaseVertical) 1f else 0f,
+            )
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+            if (frost > 0f) requestRender()
+        } else {
+            drawVideo(f, b, scaleX, scaleY, fx, fy)
+        }
+    }
+
+    private fun drawVideo(f: Int, b: Int, scaleX: Float, scaleY: Float, fx: Float, fy: Float) {
         GLES30.glUseProgram(program)
         GLES30.glUniform2f(uScale, scaleX, scaleY)
         GLES30.glUniform2f(uOffset, (1f - scaleX) * fx, (1f - scaleY) * fy)
@@ -167,6 +257,72 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         bindLayer(0, f)
         bindLayer(1, b)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLES, 0, 3)
+    }
+
+    /**
+     * Eases the displayed hinge angle towards the sensor value (hides 1° steps and
+     * turns Samsung's 0/90/180° stops into motion) and returns the fold amount 0..1.
+     */
+    private fun updateFold(): Float {
+        val now = System.nanoTime()
+        val dt = if (lastFrameNanos == 0L) 0f else ((now - lastFrameNanos) / 1e9f).coerceAtMost(0.1f)
+        lastFrameNanos = now
+        val target = if (revealEnabled && panel != PanelKind.Regular) hingeTarget else 180f
+        hinge += (target - hinge) * (1f - kotlin.math.exp(-dt / HINGE_TAU))
+        if (abs(target - hinge) > 0.2f) requestRender() else hinge = target
+        return when (panel) {
+            PanelKind.Inner -> ((180f - hinge) / 150f).coerceIn(0f, 1f)
+            PanelKind.Cover -> (hinge / 25f).coerceIn(0f, 1f)
+            PanelKind.Regular -> 0f
+        }
+    }
+
+    /** Advances the reveal animation; it starts once a video frame is on screen. */
+    private fun updateFrost(hasPicture: Boolean) {
+        if (revealRequested) {
+            revealRequested = false
+            frost = 1f
+            revealStartNanos = 0L
+        }
+        if (frost <= 0f) return
+        if (!hasPicture) return
+        val now = System.nanoTime()
+        if (revealStartNanos == 0L) revealStartNanos = now + REVEAL_HOLD_NANOS
+        val t = ((now - revealStartNanos).toFloat() / REVEAL_NANOS).coerceIn(0f, 1f)
+        val eased = 1f - (1f - t) * (1f - t) * (1f - t) // ease-out cubic
+        frost = if (t >= 1f) 0f else 1f - eased
+    }
+
+    private fun ensureFrostTarget(): Boolean {
+        if (frostWidth == width && frostHeight == height && frostFbo[0] != 0) return true
+        if (frostFbo[0] != 0) {
+            GLES30.glDeleteFramebuffers(1, frostFbo, 0)
+            GLES30.glDeleteTextures(1, frostTex, 0)
+        }
+        GLES30.glGenTextures(1, frostTex, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, frostTex[0])
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null,
+        )
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR_MIPMAP_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glGenFramebuffers(1, frostFbo, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, frostFbo[0])
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, frostTex[0], 0,
+        )
+        val complete = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) == GLES30.GL_FRAMEBUFFER_COMPLETE
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        if (!complete) {
+            Log.w(TAG, "frost framebuffer incomplete")
+            return false
+        }
+        frostWidth = width
+        frostHeight = height
+        return true
     }
 
     private fun bindLayer(unit: Int, index: Int) {
@@ -195,9 +351,9 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         }
     }
 
-    private fun buildProgram(): Int {
+    private fun buildProgram(fragment: String): Int {
         val vs = compile(GLES30.GL_VERTEX_SHADER, VERTEX)
-        val fs = compile(GLES30.GL_FRAGMENT_SHADER, FRAGMENT)
+        val fs = compile(GLES30.GL_FRAGMENT_SHADER, fragment)
         val p = GLES30.glCreateProgram()
         GLES30.glAttachShader(p, vs)
         GLES30.glAttachShader(p, fs)
@@ -227,6 +383,10 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     private companion object {
         const val TAG = "LoopRenderer"
         const val PARALLAX_RANGE = 0.6f
+        const val REVEAL_NANOS = 950_000_000f
+        const val REVEAL_HOLD_NANOS = 120_000_000L
+        const val HINGE_TAU = 0.12f
+        const val FOLD_EPSILON = 0.002f
 
         // Full-screen triangle generated from gl_VertexID: no vertex buffers needed.
         const val VERTEX = """#version 300 es
@@ -267,6 +427,57 @@ void main() {
     // Triangular dither: removes banding when 10-bit video meets an 8-bit surface.
     float d = hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 19.19) - 1.0;
     fragColor = vec4(color + d / 255.0, 1.0);
+}
+"""
+
+        // Frosted glass: a blurred mip level, a milky veil and a slight zoom that
+        // settles as the glass clears. With uCrease.x = 1 each half of the inner panel
+        // is a hinged pane: frost and shade grow towards its far edge, which is also
+        // bent slightly in perspective (iPhone Duo style).
+        const val FROST_FRAGMENT = """#version 300 es
+precision highp float;
+uniform sampler2D uFrostTex;
+uniform float uAmount;
+uniform float uFold;
+uniform vec2 uCrease;
+uniform vec2 uTexel;
+in vec2 vUv;
+out vec4 fragColor;
+
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+    vec2 uv = (vUv - 0.5) / (1.0 + 0.07 * uAmount) + 0.5;
+
+    float across = uCrease.y > 0.5 ? vUv.x : vUv.y;   // coordinate across the crease
+    float edge = abs(across - 0.5) * 2.0;              // 0 at the crease, 1 at the far edge
+    float pane = uCrease.x > 0.5 ? mix(0.3, 1.0, edge) : 1.0;
+    float fold = uFold * pane;
+    if (uCrease.x > 0.5) {
+        // Perspective: the far edge of a tilted pane looks shorter.
+        float squeeze = 1.0 - 0.09 * uFold * edge;
+        if (uCrease.y > 0.5) uv.y = (uv.y - 0.5) * (1.0 / squeeze) + 0.5;
+        else uv.x = (uv.x - 0.5) * (1.0 / squeeze) + 0.5;
+    }
+
+    float amount = max(uAmount, fold);
+    float lod = amount * 6.5;
+    vec2 r = uTexel * exp2(lod) * 0.75;
+    vec3 c = textureLod(uFrostTex, uv, lod).rgb * 0.36
+        + textureLod(uFrostTex, uv + vec2(r.x, r.y), lod).rgb * 0.16
+        + textureLod(uFrostTex, uv + vec2(-r.x, r.y), lod).rgb * 0.16
+        + textureLod(uFrostTex, uv + vec2(r.x, -r.y), lod).rgb * 0.16
+        + textureLod(uFrostTex, uv + vec2(-r.x, -r.y), lod).rgb * 0.16;
+    // Milky veil + gentle grain sell the "glass" rather than a plain blur.
+    c = mix(c, vec3(0.92), 0.16 * uAmount + 0.10 * fold);
+    c *= 1.0 - 0.42 * fold;
+    c += (hash(gl_FragCoord.xy) - 0.5) * 0.035 * amount;
+    float d = hash(gl_FragCoord.yx + 7.7) + hash(gl_FragCoord.xy + 3.3) - 1.0;
+    fragColor = vec4(c + d / 255.0, 1.0);
 }
 """
     }

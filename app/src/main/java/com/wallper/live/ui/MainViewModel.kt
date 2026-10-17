@@ -14,6 +14,9 @@ import com.wallper.live.core.Focus
 import com.wallper.live.core.Footage
 import com.wallper.live.core.FootageCategory
 import com.wallper.live.core.Playback
+import com.wallper.live.core.WallpaperRole
+import com.wallper.live.core.WallpaperRoles
+import com.wallper.live.core.WallpaperTarget
 import com.wallper.live.data.catalog.CatalogState
 import com.wallper.live.data.settings.WallpaperSettings
 import com.wallper.live.media.ClipSource
@@ -51,6 +54,8 @@ data class MainUiState(
     val exports: List<ExportJob> = emptyList(),
     val liveWallpaperActive: Boolean = false,
     val editor: EditorTarget? = null,
+    /** Android 14+: the user can pick home screen, lock screen or both. */
+    val separateLock: Boolean = WallpaperRoles.separateLockSupported,
 ) {
     val visibleFootage: List<Footage>
         get() = (catalog as? CatalogState.Ready)?.items.orEmpty().filter { category == null || it.category == category }
@@ -58,7 +63,11 @@ data class MainUiState(
     fun runningExport(footageId: String?): ExportJob? =
         exports.firstOrNull { it.footageId == footageId && it.state == ExportJob.State.Running }
 
-    fun isOnScreen(clip: Clip) = liveWallpaperActive && settings.activeClipId == clip.id
+    /** Screens currently showing [clip]. */
+    fun rolesOf(clip: Clip): Set<WallpaperRole> =
+        if (liveWallpaperActive) settings.rolesOf(clip.id) else emptySet()
+
+    fun isOnScreen(clip: Clip) = rolesOf(clip).isNotEmpty()
 }
 
 sealed interface UiAction {
@@ -111,6 +120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
     private val seenJobs = HashSet<java.util.UUID>()
+    private val pendingTargets = HashMap<String, WallpaperTarget>()
     private var jobsPrimed = false
 
     init {
@@ -134,11 +144,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (liveActive.value) send(UiEvent.Message(R.string.toast_applied))
     }
 
-    fun createFromFootage(footage: Footage, startMs: Long, loopMs: Long, speed: Float, focus: Focus) =
-        enqueue(ClipSource.Remote(footage.masterUrl), footage.title, ClipOrigin.Apple, footage.id, startMs, loopMs, speed, focus)
+    fun createFromFootage(
+        footage: Footage,
+        startMs: Long,
+        loopMs: Long,
+        speed: Float,
+        focus: Focus,
+        target: WallpaperTarget,
+    ) = enqueue(
+        ClipSource.Remote(footage.masterUrl), footage.title, ClipOrigin.Apple, footage.id,
+        startMs, loopMs, speed, focus, target,
+    )
 
-    fun createFromDevice(uri: Uri, title: String, startMs: Long, loopMs: Long, speed: Float, focus: Focus) {
-        enqueue(ClipSource.Local(uri), title, ClipOrigin.Device, null, startMs, loopMs, speed, focus)
+    fun createFromDevice(
+        uri: Uri,
+        title: String,
+        startMs: Long,
+        loopMs: Long,
+        speed: Float,
+        focus: Focus,
+        target: WallpaperTarget,
+    ) {
+        enqueue(ClipSource.Local(uri), title, ClipOrigin.Device, null, startMs, loopMs, speed, focus, target)
         tab.value = HomeTab.Mine
         closeEditor()
     }
@@ -152,7 +179,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         loopMs: Long,
         speed: Float,
         focus: Focus,
+        target: WallpaperTarget,
     ) {
+        pendingTargets[footageId.orEmpty()] = target
         container.exports.enqueue(
             ExportRequest(
                 source = source,
@@ -164,7 +193,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fadeMs = Playback.FADE_MS,
                 speed = speed,
                 focus = focus,
-                activate = true,
+                assign = target,
             ),
         )
     }
@@ -172,10 +201,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSpeed(clipId: String, speed: Float) = viewModelScope.launch { container.settings.setSpeed(clipId, speed) }
     fun saveFocus(clipId: String, focus: Focus) = viewModelScope.launch { container.settings.setFocus(clipId, focus) }
 
-    fun apply(clip: Clip) = viewModelScope.launch {
-        container.settings.setActiveClip(clip.id)
+    fun apply(clip: Clip, target: WallpaperTarget) = viewModelScope.launch {
+        container.settings.assign(clip.id, target)
         refreshLiveWallpaper()
-        if (liveActive.value) send(UiEvent.Message(R.string.toast_updated)) else send(UiEvent.OpenPicker)
+        if (LiveWallpaper.covers(getApplication(), target)) {
+            send(UiEvent.Message(R.string.toast_updated))
+        } else {
+            send(UiEvent.OpenPicker)
+        }
     }
 
     /** Deletion is deferred until the undo snackbar is dismissed. */
@@ -197,6 +230,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setSeamless(enabled: Boolean) = viewModelScope.launch { container.settings.setSeamlessLoop(enabled) }
     fun setParallax(enabled: Boolean) = viewModelScope.launch { container.settings.setParallax(enabled) }
     fun setPauseOnPowerSave(enabled: Boolean) = viewModelScope.launch { container.settings.setPauseOnPowerSave(enabled) }
+    fun setFrostReveal(enabled: Boolean) = viewModelScope.launch { container.settings.setFrostReveal(enabled) }
 
     fun storageBytes(): Long = container.library.sizeOnDisk()
 
@@ -213,9 +247,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 continue
             }
             refreshLiveWallpaper()
+            val target = pendingTargets.remove(job.footageId.orEmpty()) ?: WallpaperTarget.Both
             val editingThis = (editor.value as? EditorTarget.FromFootage)?.footage?.id == job.footageId
             when {
-                liveActive.value -> send(UiEvent.Message(R.string.toast_applied))
+                LiveWallpaper.covers(getApplication(), target) -> send(UiEvent.Message(R.string.toast_applied))
                 editingThis -> send(UiEvent.OpenPicker)
                 else -> send(UiEvent.Message(R.string.toast_ready, UiAction.OpenPicker, R.string.action_set))
             }

@@ -14,6 +14,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.source.MediaSource
 import com.wallper.live.core.Clip
+import com.wallper.live.core.WallpaperRole
 import com.wallper.live.data.library.ClipLibrary
 import com.wallper.live.data.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -26,10 +27,14 @@ import kotlinx.coroutines.launch
 /**
  * One playback session shared by every wallpaper engine in the process.
  *
- * Foldables run separate wallpaper engines for the cover and the inner display. Because
- * they share this hub, folding or unfolding only moves the decoder output to the
- * engine that became visible: the video keeps its position instead of restarting.
- * Main thread only.
+ * The system runs separate wallpaper engines for the home screen, the lock screen
+ * (Android 14+) and each display of a foldable. The hub always plays the clip assigned
+ * to the role of the engine that is visible now:
+ *  - same clip: unlocking, folding or unfolding only moves the decoder output to the
+ *    engine that became visible, so the video continues on the very same frame;
+ *  - different clips (home ≠ lock): the session is switched and each clip resumes
+ *    where it stopped.
+ * Only one session (≤ 2 decoders) exists at a time. Main thread only.
  */
 @OptIn(UnstableApi::class)
 class PlaybackHub(
@@ -40,29 +45,33 @@ class PlaybackHub(
     private val scope: CoroutineScope,
 ) {
     private data class Desired(
-        val clip: Clip?,
-        val speed: Float,
+        val home: Clip?,
+        val lock: Clip?,
+        val speeds: Map<String, Float>,
         val seamless: Boolean,
         val pauseOnPowerSave: Boolean,
         val powerSave: Boolean,
-    )
+    ) {
+        fun clipFor(role: WallpaperRole) = if (role == WallpaperRole.Lock) lock else home
+    }
 
     private data class SessionKey(val clipId: String, val seamless: Boolean)
 
+    private class Visible(val target: VideoTarget, var role: WallpaperRole)
+
     private val handler = Handler(Looper.getMainLooper())
     private val owners = HashSet<Any>()
-    private val visible = ArrayList<VideoTarget>()
+    private val visible = ArrayList<Visible>()
     private val powerSave = MutableStateFlow(false)
+    private val resumePositions = HashMap<String, Long>()
 
     private var desired: Desired? = null
     private var session: LoopSession? = null
     private var sessionKey: SessionKey? = null
-    private var resumeClipId: String? = null
-    private var resumePositionMs = 0L
     private var collectJob: Job? = null
 
-    private val pauseRunnable = Runnable { updatePlayState() }
-    private val releaseRunnable = Runnable { releaseSession(rememberPosition = true) }
+    private val pauseRunnable = Runnable { session?.pause() }
+    private val releaseRunnable = Runnable { releaseSession() }
 
     private val powerReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -82,15 +91,19 @@ class PlaybackHub(
         powerSave.value = context.getSystemService(PowerManager::class.java).isPowerSaveMode
         collectJob = scope.launch {
             combine(settings.settings, library.clips, powerSave) { s, clips, saving ->
-                val clip = clips.firstOrNull { it.id == s.activeClipId }
+                fun clip(id: String?) = id?.let { wanted -> clips.firstOrNull { it.id == wanted } }
                 Desired(
-                    clip = clip,
-                    speed = clip?.let { s.speedOf(it.id) } ?: 1f,
+                    home = clip(s.clipIdFor(WallpaperRole.Home)),
+                    lock = clip(s.clipIdFor(WallpaperRole.Lock)),
+                    speeds = s.speeds,
                     seamless = s.seamlessLoop,
                     pauseOnPowerSave = s.pauseOnPowerSave,
                     powerSave = saving,
                 )
-            }.distinctUntilChanged().collect { apply(it) }
+            }.distinctUntilChanged().collect {
+                desired = it
+                reconcile()
+            }
         }
     }
 
@@ -101,24 +114,31 @@ class PlaybackHub(
         collectJob = null
         runCatching { context.unregisterReceiver(powerReceiver) }
         handler.removeCallbacksAndMessages(null)
-        releaseSession(rememberPosition = false)
+        releaseSession()
         visible.clear()
+        resumePositions.clear()
     }
 
-    fun show(target: VideoTarget) {
+    fun show(target: VideoTarget, role: WallpaperRole) {
         handler.removeCallbacks(pauseRunnable)
         handler.removeCallbacks(releaseRunnable)
-        visible.remove(target)
-        visible += target
-        if (session == null) desired?.let(::apply) else session?.attach(target)
-        updatePlayState()
+        visible.removeAll { it.target === target }
+        visible += Visible(target, role)
+        reconcile()
+    }
+
+    /** The engine was moved between the home and the lock screen. */
+    fun updateRole(target: VideoTarget, role: WallpaperRole) {
+        val entry = visible.firstOrNull { it.target === target } ?: return
+        if (entry.role == role) return
+        entry.role = role
+        reconcile()
     }
 
     fun hide(target: VideoTarget) {
-        visible.remove(target)
-        val next = visible.lastOrNull()
-        if (next != null) {
-            session?.attach(next)
+        visible.removeAll { it.target === target }
+        if (visible.isNotEmpty()) {
+            reconcile()
             return
         }
         // Grace period: a fold/unfold hides one engine just before showing the other.
@@ -128,29 +148,25 @@ class PlaybackHub(
 
     /** The engine owning [target] is going away: stop drawing into its surfaces. */
     fun forget(target: VideoTarget) {
-        visible.remove(target)
+        visible.removeAll { it.target === target }
         session?.detach(target)
-        visible.lastOrNull()?.let { session?.attach(it) }
+        if (visible.isNotEmpty()) reconcile()
     }
 
-    private fun apply(next: Desired) {
-        desired = next
-        val clip = next.clip
+    private fun reconcile() {
+        val wanted = desired ?: return
+        val current = visible.lastOrNull() ?: return
+        val clip = wanted.clipFor(current.role)
         if (clip == null) {
-            releaseSession(rememberPosition = false)
+            releaseSession()
             return
         }
-        val key = SessionKey(clip.id, next.seamless && clip.fadeMs > 0)
+        val key = SessionKey(clip.id, wanted.seamless && clip.fadeMs > 0)
         if (key != sessionKey) {
-            val position = when {
-                sessionKey?.clipId == clip.id -> session?.positionMs ?: 0
-                resumeClipId == clip.id -> resumePositionMs
-                else -> 0
-            }
-            releaseSession(rememberPosition = false)
-            resumeClipId = clip.id
-            resumePositionMs = position
-            if (visible.isEmpty()) return // created lazily by show()
+            // Continue the same clip from where it is (e.g. seamless toggled), otherwise
+            // resume the newly shown clip from where it was last left.
+            val position = if (sessionKey?.clipId == clip.id) session?.positionMs else null
+            releaseSession()
             session = LoopSession(
                 context = context,
                 mediaSourceFactory = mediaSourceFactory,
@@ -160,27 +176,19 @@ class PlaybackHub(
                     fadeMs = clip.fadeMs,
                 ),
                 seamless = key.seamless,
-                startPositionMs = position,
+                startPositionMs = position ?: resumePositions[clip.id] ?: 0,
             )
             sessionKey = key
         }
-        visible.lastOrNull()?.let { session?.attach(it) }
-        session?.speed = next.speed
-        updatePlayState()
+        val active = session ?: return
+        active.attach(current.target)
+        active.speed = wanted.speeds[clip.id] ?: 1f
+        if (wanted.pauseOnPowerSave && wanted.powerSave) active.pause() else active.play()
     }
 
-    private fun updatePlayState() {
+    private fun releaseSession() {
         val current = session ?: return
-        val blockedByPowerSave = desired?.let { it.pauseOnPowerSave && it.powerSave } == true
-        if (visible.isNotEmpty() && !blockedByPowerSave) current.play() else current.pause()
-    }
-
-    private fun releaseSession(rememberPosition: Boolean) {
-        val current = session ?: return
-        if (rememberPosition) {
-            resumeClipId = sessionKey?.clipId
-            resumePositionMs = current.positionMs
-        }
+        sessionKey?.let { resumePositions[it.clipId] = current.positionMs }
         current.release()
         session = null
         sessionKey = null

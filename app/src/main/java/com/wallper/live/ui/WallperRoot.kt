@@ -126,11 +126,14 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
 
     val actions = EditorActions(
         onBack = vm::closeEditor,
-        onCreateFromFootage = vm::createFromFootage,
-        onCreateFromDevice = { uri, start, loop, speed, focus ->
-            vm.createFromDevice(uri, context.getString(R.string.tab_mine), start, loop, speed, focus)
+        onOpen = vm::open,
+        onCreateFromFootage = { footage, start, loop, speed, focus, target ->
+            vm.createFromFootage(footage, start, loop, speed, focus, target)
         },
-        onApply = { vm.apply(it) },
+        onCreateFromDevice = { uri, start, loop, speed, focus, target ->
+            vm.createFromDevice(uri, context.getString(R.string.tab_mine), start, loop, speed, focus, target)
+        },
+        onApply = { clip, target -> vm.apply(clip, target) },
         onDelete = vm::requestDelete,
         onSaveSpeed = { id, speed -> vm.saveSpeed(id, speed) },
         onSaveFocus = { id, focus -> vm.saveFocus(id, focus) },
@@ -219,6 +222,7 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
             onSeamless = vm::setSeamless,
             onParallax = vm::setParallax,
             onPowerSave = vm::setPauseOnPowerSave,
+            onFrost = vm::setFrostReveal,
             onDismiss = { showSettings = false },
         )
     }

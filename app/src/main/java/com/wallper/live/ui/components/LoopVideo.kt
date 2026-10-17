@@ -49,6 +49,8 @@ fun LoopVideo(
     speed: Float,
     focus: Focus,
     modifier: Modifier = Modifier,
+    frostReveal: Boolean = false,
+    revealKey: Any? = null,
     onFocusChange: ((Focus) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -67,6 +69,12 @@ fun LoopVideo(
     }
 
     LaunchedEffect(session, speed) { session?.speed = speed }
+
+    // Replays the frosted-glass reveal, e.g. when the preview switches lock → home.
+    LaunchedEffect(revealKey, frostReveal) {
+        view.renderer.revealEnabled = frostReveal
+        view.renderer.reveal()
+    }
 
     SideEffect {
         view.renderer.focusX = focus.x

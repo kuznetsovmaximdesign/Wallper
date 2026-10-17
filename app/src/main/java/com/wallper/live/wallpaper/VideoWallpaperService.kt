@@ -1,15 +1,30 @@
 package com.wallper.live.wallpaper
 
 import android.app.WallpaperColors
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.BitmapFactory
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.opengl.GLSurfaceView
+import android.os.Build
 import android.service.wallpaper.WallpaperService
+import android.view.Surface
 import android.view.SurfaceHolder
+import androidx.core.content.ContextCompat
 import com.wallper.live.WallperApplication
+import com.wallper.live.core.Foldables
+import com.wallper.live.core.WallpaperRole
+import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.playback.LoopRenderer
 import java.io.File
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -26,7 +41,27 @@ class VideoWallpaperService : WallpaperService() {
         private var glView: EngineGlSurfaceView? = null
         private val renderer = LoopRenderer { glView?.requestRender() }
 
+        private val role = MutableStateFlow(WallpaperRole.Home)
+
         @Volatile private var coverFile: File? = null
+
+        private val foldable = Foldables.isFoldable(this@VideoWallpaperService)
+        private val sensors = getSystemService(SensorManager::class.java)
+        private var hingeRegistered = false
+
+        private val hingeListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                renderer.setHingeAngle(event.values[0])
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+
+        private val unlockReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (isVisible) renderer.reveal()
+            }
+        }
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
@@ -39,19 +74,27 @@ class VideoWallpaperService : WallpaperService() {
                 renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
             }
             container.playbackHub.register(this)
+            // Unlocking keeps the same engine visible before Android 14: reveal on unlock too.
+            ContextCompat.registerReceiver(
+                this@VideoWallpaperService,
+                unlockReceiver,
+                IntentFilter(Intent.ACTION_USER_PRESENT),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
 
             scope.launch {
-                container.settings.settings.collect { s ->
-                    val focus = s.activeClipId?.let(s::focusOf)
+                combine(container.settings.settings, role) { s, on -> s to on }.collect { (s, on) ->
+                    val focus = s.clipIdFor(on)?.let(s::focusOf)
                     renderer.focusX = focus?.x ?: 0.5f
                     renderer.focusY = focus?.y ?: 0.5f
                     renderer.parallaxEnabled = s.parallax
+                    renderer.revealEnabled = s.frostReveal
                     glView?.requestRender()
                 }
             }
             scope.launch {
-                combine(container.settings.settings, container.library.clips) { s, clips ->
-                    clips.firstOrNull { it.id == s.activeClipId }?.let(container.library::coverOf)
+                combine(container.settings.settings, container.library.clips, role) { s, clips, on ->
+                    clips.firstOrNull { it.id == s.clipIdFor(on) }?.let(container.library::coverOf)
                 }.map { it?.path }.distinctUntilChanged().collect { path ->
                     coverFile = path?.let(::File)
                     notifyColorsChanged()
@@ -67,6 +110,15 @@ class VideoWallpaperService : WallpaperService() {
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
             glView?.surfaceChanged(holder, format, width, height)
+            refreshRole()
+            renderer.panel = Foldables.classify(width, height, foldable)
+            // The crease is vertical in the display's natural orientation (Fold, Pixel Fold).
+            val rotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                displayContext?.display?.rotation ?: Surface.ROTATION_0
+            } else {
+                Surface.ROTATION_0
+            }
+            renderer.creaseVertical = rotation == Surface.ROTATION_0 || rotation == Surface.ROTATION_180
         }
 
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
@@ -76,12 +128,46 @@ class VideoWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(visible: Boolean) {
             if (visible) {
+                renderer.reveal()
+                setHingeTracking(true)
                 glView?.onResume()
-                container.playbackHub.show(renderer.target)
+                refreshRole()
+                container.playbackHub.show(renderer.target, role.value)
             } else {
                 container.playbackHub.hide(renderer.target)
+                setHingeTracking(false)
                 glView?.onPause()
             }
+        }
+
+        override fun onWallpaperFlagsChanged(which: Int) {
+            super.onWallpaperFlagsChanged(which)
+            refreshRole()
+        }
+
+        /** Follows the hinge only while visible on a foldable (the sensor costs power). */
+        private fun setHingeTracking(enabled: Boolean) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+            if (!foldable || enabled == hingeRegistered) return
+            val sensor = sensors?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) ?: return
+            hingeRegistered = if (enabled) {
+                sensors.registerListener(hingeListener, sensor, SensorManager.SENSOR_DELAY_GAME)
+            } else {
+                sensors.unregisterListener(hingeListener)
+                false
+            }
+        }
+
+        /** Home or lock screen? Only Android 14+ can tell (and only it can differ). */
+        private fun refreshRole() {
+            val next = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                WallpaperRoles.fromFlags(wallpaperFlags)
+            } else {
+                WallpaperRole.Home
+            }
+            if (next == role.value) return
+            role.value = next
+            if (isVisible) container.playbackHub.updateRole(renderer.target, next)
         }
 
         override fun onOffsetsChanged(
@@ -108,6 +194,8 @@ class VideoWallpaperService : WallpaperService() {
         }
 
         override fun onDestroy() {
+            runCatching { unregisterReceiver(unlockReceiver) }
+            setHingeTracking(false)
             scope.cancel()
             container.playbackHub.forget(renderer.target)
             container.playbackHub.unregister(this)

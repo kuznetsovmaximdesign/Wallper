@@ -50,7 +50,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -69,6 +68,7 @@ import com.wallper.live.core.Clip
 import com.wallper.live.core.Focus
 import com.wallper.live.core.Footage
 import com.wallper.live.core.Playback
+import com.wallper.live.core.WallpaperTarget
 import com.wallper.live.core.formatDuration
 import com.wallper.live.core.formatTimestamp
 import com.wallper.live.media.ClipSource
@@ -83,9 +83,10 @@ import kotlinx.coroutines.delay
 /** Callbacks of the editor, grouped to keep call sites readable. */
 data class EditorActions(
     val onBack: (() -> Unit)?,
-    val onCreateFromFootage: (Footage, startMs: Long, loopMs: Long, speed: Float, focus: Focus) -> Unit,
-    val onCreateFromDevice: (Uri, startMs: Long, loopMs: Long, speed: Float, focus: Focus) -> Unit,
-    val onApply: (Clip) -> Unit,
+    val onOpen: (EditorTarget) -> Unit,
+    val onCreateFromFootage: (Footage, Long, Long, Float, Focus, WallpaperTarget) -> Unit,
+    val onCreateFromDevice: (Uri, Long, Long, Float, Focus, WallpaperTarget) -> Unit,
+    val onApply: (Clip, WallpaperTarget) -> Unit,
     val onDelete: (Clip) -> Unit,
     val onSaveSpeed: (String, Float) -> Unit,
     val onSaveFocus: (String, Focus) -> Unit,
@@ -103,8 +104,15 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
             primaryLabel = stringResource(R.string.action_create),
             actions = actions,
             modifier = modifier,
-            onCreate = { start, loop, speed, focus ->
-                actions.onCreateFromFootage(target.footage, start, loop, speed, focus)
+            strip = {
+                FootageStrip(
+                    items = state.visibleFootage,
+                    selectedId = target.footage.id,
+                    onSelect = { actions.onOpen(EditorTarget.FromFootage(it)) },
+                )
+            },
+            onCreate = { start, loop, speed, focus, where ->
+                actions.onCreateFromFootage(target.footage, start, loop, speed, focus, where)
             },
         )
         is EditorTarget.FromDevice -> SourceEditor(
@@ -116,7 +124,10 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
             primaryLabel = stringResource(R.string.action_create_local),
             actions = actions,
             modifier = modifier,
-            onCreate = { start, loop, speed, focus -> actions.onCreateFromDevice(target.uri, start, loop, speed, focus) },
+            strip = null,
+            onCreate = { start, loop, speed, focus, where ->
+                actions.onCreateFromDevice(target.uri, start, loop, speed, focus, where)
+            },
         )
         is EditorTarget.FromClip -> {
             val clip = state.clips.firstOrNull { it.id == target.clipId } ?: return
@@ -136,11 +147,14 @@ private fun SourceEditor(
     primaryLabel: String,
     actions: EditorActions,
     modifier: Modifier,
-    onCreate: (startMs: Long, loopMs: Long, speed: Float, focus: Focus) -> Unit,
+    strip: (@Composable () -> Unit)?,
+    onCreate: (startMs: Long, loopMs: Long, speed: Float, focus: Focus, target: WallpaperTarget) -> Unit,
 ) {
+    var askTarget by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val probe = remember(context) { (context.applicationContext as WallperApplication).container.probe }
-    val duration by produceState<Long?>(null, key) { value = probe.durationMs(previewSource) }
+    var duration by remember(key) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(key) { duration = probe.durationMs(previewSource) }
 
     var startMs by rememberSaveable(key) { mutableLongStateOf(-1L) }
     var loopMs by rememberSaveable(key) { mutableLongStateOf(Playback.MAX_LOOP_MS) }
@@ -153,6 +167,14 @@ private fun SourceEditor(
         if (startMs < 0) {
             startMs = (total * 0.2).toLong().coerceAtMost((total - Playback.MIN_LOOP_MS).coerceAtLeast(0))
             loopMs = minOf(Playback.MAX_LOOP_MS, total - startMs - Playback.FADE_MS).coerceAtLeast(Playback.MIN_LOOP_MS)
+        }
+    }
+
+    fun requestCreate() {
+        if (state.separateLock) {
+            askTarget = true
+        } else {
+            onCreate(startMs, loopMs, speed, focus, WallpaperTarget.Both)
         }
     }
 
@@ -187,13 +209,14 @@ private fun SourceEditor(
 
     EditorScaffold(
         spec = spec,
-        seamless = state.settings.seamlessLoop,
+        state = state,
         speed = speed,
         focus = focus,
         onFocus = { focus = it },
         onBack = actions.onBack,
         modifier = modifier,
     ) {
+        strip?.invoke()
         PanelTitle(title ?: stringResource(R.string.tab_mine), subtitle = duration?.let { "4K · ${formatTimestamp(it)}" })
         val total = duration
         if (total != null && startMs >= 0) {
@@ -207,7 +230,17 @@ private fun SourceEditor(
             label = primaryLabel,
             progress = progress,
             enabled = progress == null && startMs >= 0,
-            onClick = { onCreate(startMs, loopMs, speed, focus) },
+            onClick = ::requestCreate,
+        )
+    }
+
+    if (askTarget) {
+        TargetSheet(
+            onPick = {
+                askTarget = false
+                onCreate(startMs, loopMs, speed, focus, it)
+            },
+            onDismiss = { askTarget = false },
         )
     }
 }
@@ -219,12 +252,21 @@ private fun ClipEditor(clip: Clip, state: MainUiState, actions: EditorActions, m
     val library = remember(context) { (context.applicationContext as WallperApplication).container.library }
     var speed by remember(clip.id) { mutableFloatStateOf(state.settings.speedOf(clip.id)) }
     var focus by remember(clip.id) { mutableStateOf(state.settings.focusOf(clip.id)) }
+    var askTarget by remember { mutableStateOf(false) }
     val spec = remember(clip.id) {
         LoopSession.LoopSpec(
             mediaItem = MediaItem.fromUri(Uri.fromFile(library.fileOf(clip))),
             loopMs = clip.loopMs,
             fadeMs = clip.fadeMs,
         )
+    }
+
+    fun requestApply() {
+        if (state.separateLock) {
+            askTarget = true
+        } else {
+            actions.onApply(clip, WallpaperTarget.Both)
+        }
     }
 
     // Persist framing shortly after the user stops dragging.
@@ -235,13 +277,20 @@ private fun ClipEditor(clip: Clip, state: MainUiState, actions: EditorActions, m
 
     EditorScaffold(
         spec = spec,
-        seamless = state.settings.seamlessLoop,
+        state = state,
         speed = speed,
         focus = focus,
         onFocus = { focus = it },
         onBack = actions.onBack,
         modifier = modifier,
     ) {
+        if (state.clips.size > 1) {
+            ClipStrip(
+                clips = state.clips,
+                selectedId = clip.id,
+                onSelect = { actions.onOpen(EditorTarget.FromClip(it.id)) },
+            )
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
                 PanelTitle(clip.title, subtitle = (if (clip.isUhd) "4K · " else "") + formatDuration(clip.loopMs))
@@ -256,13 +305,25 @@ private fun ClipEditor(clip: Clip, state: MainUiState, actions: EditorActions, m
             onSpeed = { speed = it },
             onSpeedFinished = { actions.onSaveSpeed(clip.id, speed) },
         )
-        val onScreen = state.isOnScreen(clip)
+        // Fully applied only when it is on every screen it can be on.
+        val roles = state.rolesOf(clip)
+        val everywhere = roles.size == (if (state.separateLock) 2 else 1)
         PrimaryButton(
-            label = stringResource(if (onScreen) R.string.action_applied else R.string.action_set),
+            label = stringResource(if (everywhere) R.string.action_applied else R.string.action_set),
             progress = null,
-            enabled = !onScreen,
-            done = onScreen,
-            onClick = { actions.onApply(clip) },
+            enabled = !everywhere,
+            done = everywhere,
+            onClick = ::requestApply,
+        )
+    }
+
+    if (askTarget) {
+        TargetSheet(
+            onPick = {
+                askTarget = false
+                actions.onApply(clip, it)
+            },
+            onDismiss = { askTarget = false },
         )
     }
 }
@@ -270,7 +331,7 @@ private fun ClipEditor(clip: Clip, state: MainUiState, actions: EditorActions, m
 @Composable
 private fun EditorScaffold(
     spec: LoopSession.LoopSpec?,
-    seamless: Boolean,
+    state: MainUiState,
     speed: Float,
     focus: Focus,
     onFocus: (Focus) -> Unit,
@@ -284,9 +345,12 @@ private fun EditorScaffold(
     Box(modifier.fillMaxSize().background(Color.Black)) {
         LoopVideo(
             spec = spec,
-            seamless = seamless,
+            seamless = state.settings.seamlessLoop,
             speed = speed,
             focus = focus,
+            frostReveal = state.settings.frostReveal,
+            // Switching the mock from lock to home plays the reveal, like unlocking.
+            revealKey = spec?.mediaItem?.mediaId to chrome,
             onFocusChange = onFocus,
             modifier = Modifier.fillMaxSize(),
         )

@@ -54,6 +54,13 @@ android {
         buildConfig = true
     }
 
+    lint {
+        // Print every finding to the CI log, not just the first failure.
+        textReport = true
+        textOutput = file("stdout")
+        explainIssues = false
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }

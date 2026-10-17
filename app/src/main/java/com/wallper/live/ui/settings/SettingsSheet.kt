@@ -36,6 +36,7 @@ fun SettingsSheet(
     onSeamless: (Boolean) -> Unit,
     onParallax: (Boolean) -> Unit,
     onPowerSave: (Boolean) -> Unit,
+    onFrost: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -47,6 +48,7 @@ fun SettingsSheet(
         Column(Modifier.padding(horizontal = 24.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
             Text(stringResource(R.string.settings_title), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(12.dp))
+            ToggleRow(R.string.settings_frost, R.string.settings_frost_hint, settings.frostReveal, onFrost)
             ToggleRow(R.string.editor_loop, R.string.editor_loop_hint, settings.seamlessLoop, onSeamless)
             ToggleRow(R.string.settings_parallax, R.string.settings_parallax_hint, settings.parallax, onParallax)
             ToggleRow(R.string.settings_battery, R.string.settings_battery_hint, settings.pauseOnPowerSave, onPowerSave)

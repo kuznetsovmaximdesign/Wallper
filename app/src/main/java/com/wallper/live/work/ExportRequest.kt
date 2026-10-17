@@ -5,6 +5,7 @@ import androidx.work.Data
 import androidx.work.workDataOf
 import com.wallper.live.core.ClipOrigin
 import com.wallper.live.core.Focus
+import com.wallper.live.core.WallpaperTarget
 import com.wallper.live.media.ClipSource
 
 /** Everything needed to cut one wallpaper clip in the background. */
@@ -18,7 +19,8 @@ data class ExportRequest(
     val fadeMs: Long,
     val speed: Float,
     val focus: Focus,
-    val activate: Boolean,
+    /** Screen(s) to put the finished clip on; null only adds it to the library. */
+    val assign: WallpaperTarget?,
 ) {
     fun toData(): Data = workDataOf(
         KEY_REMOTE to (source as? ClipSource.Remote)?.url,
@@ -32,7 +34,7 @@ data class ExportRequest(
         KEY_SPEED to speed,
         KEY_FOCUS_X to focus.x,
         KEY_FOCUS_Y to focus.y,
-        KEY_ACTIVATE to activate,
+        KEY_ASSIGN to assign?.name,
     )
 
     companion object {
@@ -47,7 +49,7 @@ data class ExportRequest(
         private const val KEY_SPEED = "speed"
         private const val KEY_FOCUS_X = "focus_x"
         private const val KEY_FOCUS_Y = "focus_y"
-        private const val KEY_ACTIVATE = "activate"
+        private const val KEY_ASSIGN = "assign"
 
         fun fromData(data: Data): ExportRequest? {
             val source = data.getString(KEY_REMOTE)?.let { ClipSource.Remote(it) }
@@ -64,7 +66,7 @@ data class ExportRequest(
                 fadeMs = data.getLong(KEY_FADE, 0),
                 speed = data.getFloat(KEY_SPEED, 1f),
                 focus = Focus(data.getFloat(KEY_FOCUS_X, 0.5f), data.getFloat(KEY_FOCUS_Y, 0.5f)),
-                activate = data.getBoolean(KEY_ACTIVATE, false),
+                assign = data.getString(KEY_ASSIGN)?.let { name -> WallpaperTarget.entries.firstOrNull { it.name == name } },
             )
         }
     }

@@ -57,6 +57,19 @@
     <string name="settings_storage">Обои занимают %1$s</string>
     <string name="settings_about">Видео Apple Aerials загружаются напрямую с серверов Apple на ваше устройство для личного использования. Сохраняется только выбранный фрагмент — до 30 секунд, в исходном 4K-качестве без перекодирования.</string>
 
+    <string name="target_title">Куда установить?</string>
+    <string name="target_both">Экран блокировки и рабочий стол</string>
+    <string name="target_both_hint">Одно видео — после разблокировки продолжается с того же кадра</string>
+    <string name="target_home">Рабочий стол</string>
+    <string name="target_home_hint">Экран блокировки останется прежним</string>
+    <string name="target_lock">Экран блокировки</string>
+    <string name="target_lock_hint">Рабочий стол останется прежним</string>
+    <string name="target_system_note">Android попросит подтвердить установку — выберите там тот же вариант.</string>
+    <string name="badge_home">Рабочий стол</string>
+    <string name="badge_lock">Блокировка</string>
+    <string name="settings_frost">Матовое стекло, как iPhone Duo</string>
+    <string name="settings_frost_hint">Обои проявляются из матового стекла при включении экрана и разблокировке; на складных — следуют за раскрытием шарнира</string>
+
     <string name="notification_channel">Подготовка обоев</string>
     <string name="notification_title">Готовим видеообои</string>
 </resources>

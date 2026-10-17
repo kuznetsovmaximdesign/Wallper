@@ -50,7 +50,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,6 +70,8 @@ import com.wallper.live.WallperApplication
 import com.wallper.live.core.Clip
 import com.wallper.live.core.Footage
 import com.wallper.live.core.FootageCategory
+import com.wallper.live.core.WallpaperRole
+import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.core.formatDuration
 import com.wallper.live.data.catalog.CatalogState
 import com.wallper.live.ui.HomeTab
@@ -195,7 +199,7 @@ private fun LazyGridScope.mineTab(
     items(state.clips, key = { it.id }) { clip ->
         ClipCard(
             clip = clip,
-            onScreen = state.isOnScreen(clip),
+            roles = state.rolesOf(clip),
             selected = clip.id == selectedId,
             onClick = { onClip(clip) },
         )
@@ -244,7 +248,8 @@ private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?
 private fun FootageCard(footage: Footage, progress: Float?, selected: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
-    val cover by produceState(covers.cached(footage), footage.id) { value = value ?: covers.cover(footage) }
+    var cover by remember(footage.id) { mutableStateOf(covers.cached(footage)) }
+    LaunchedEffect(footage.id) { if (cover == null) cover = covers.cover(footage) }
     MediaCard(
         cover = cover,
         title = footage.title,
@@ -256,7 +261,7 @@ private fun FootageCard(footage: Footage, progress: Float?, selected: Boolean, o
 }
 
 @Composable
-private fun ClipCard(clip: Clip, onScreen: Boolean, selected: Boolean, onClick: () -> Unit) {
+private fun ClipCard(clip: Clip, roles: Set<WallpaperRole>, selected: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     val library = remember(context) { (context.applicationContext as WallperApplication).container.library }
     MediaCard(
@@ -265,7 +270,15 @@ private fun ClipCard(clip: Clip, onScreen: Boolean, selected: Boolean, onClick: 
         caption = (if (clip.isUhd) "4K · " else "") + formatDuration(clip.loopMs),
         selected = selected,
         onClick = onClick,
-        badge = { if (onScreen) ActiveBadge() },
+        badge = {
+            when {
+                roles.size == 2 || (roles.isNotEmpty() && !WallpaperRoles.separateLockSupported) ->
+                    ActiveBadge(R.string.badge_active)
+                WallpaperRole.Home in roles -> ActiveBadge(R.string.badge_home)
+                WallpaperRole.Lock in roles -> ActiveBadge(R.string.badge_lock)
+                else -> Unit
+            }
+        },
     )
 }
 
@@ -351,7 +364,7 @@ private fun ImportCard(onImport: () -> Unit) {
 }
 
 @Composable
-private fun ActiveBadge() {
+private fun ActiveBadge(label: Int) {
     Row(
         Modifier
             .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
@@ -361,7 +374,7 @@ private fun ActiveBadge() {
     ) {
         Box(Modifier.size(7.dp).background(Color(0xFF5BE38A), CircleShape))
         Spacer(Modifier.width(6.dp))
-        Text(stringResource(R.string.badge_active), style = MaterialTheme.typography.labelMedium, color = Color.White)
+        Text(stringResource(label), style = MaterialTheme.typography.labelMedium, color = Color.White)
     }
 }
 

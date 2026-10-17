@@ -63,7 +63,7 @@ class ClipExportWorker(context: Context, params: WorkerParameters) : CoroutineWo
             container.library.add(clip)
             container.settings.setSpeed(clipId, request.speed)
             container.settings.setFocus(clipId, request.focus)
-            if (request.activate) container.settings.setActiveClip(clipId)
+            request.assign?.let { container.settings.assign(clipId, it) }
             Result.success(workDataOf(ExportScheduler.CLIP_ID to clipId))
         } catch (e: CancellationException) {
             cleanUp(video, cover)
