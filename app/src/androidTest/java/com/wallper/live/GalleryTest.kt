@@ -75,7 +75,7 @@ class GalleryTest {
         app.find(TestTags.VIEWER)
         Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "viewer after install")
 
-        app.tap(TestTags.BACK)
+        app.closeViewer()
         app.tap(TestTags.TAB_MINE)
         // The new clip is in "Mine" and its card comes alive too.
         val clip = app.device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile("card-.*"))), START_TIMEOUT_MS)
@@ -86,7 +86,7 @@ class GalleryTest {
         app.tap(TestTags.DOCK_FRAME)
         Screen.assertKeepsPlaying(app::videoArea, 2_500, "clip after Frame")
         app.tap(TestTags.DOCK_FRAME)
-        app.tap(TestTags.BACK)
+        app.closeViewer()
         app.tap(TestTags.TAB_GALLERY)
     }
 

@@ -130,7 +130,7 @@ class ViewerTest {
     fun backToGalleryKeepsCardsPlaying() {
         app.openFootage(SCENE_A)
         Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "viewer")
-        app.tap(TestTags.BACK)
+        app.closeViewer()
         app.find(TestTags.GRID)
         Screen.awaitMoving({ app.cardArea(SCENE_A) }, START_TIMEOUT_MS, "hero after back")
     }

@@ -73,9 +73,10 @@ jobs:
       matrix:
         include:
           - name: phone
-            profile: pixel_7
+            screen: ""
+          # The Fold's inner screen: wide enough for the side-by-side layout.
           - name: foldable
-            profile: pixel_fold
+            screen: "1840x2208"
     name: ui-tests (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
@@ -113,12 +114,14 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
-          profile: ${{ matrix.profile }}
+          profile: pixel_7
           ram-size: 4096M
           disk-size: 6000M
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: ./gradlew connectedDebugAndroidTest
+          script: |
+            if [ -n "${{ matrix.screen }}" ]; then adb shell wm size ${{ matrix.screen }}; adb shell wm density 360; fi
+            ./gradlew connectedDebugAndroidTest
 
       - uses: actions/upload-artifact@v4
         if: always()

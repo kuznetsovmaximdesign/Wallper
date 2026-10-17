@@ -106,6 +106,11 @@ class AppRobot {
         SystemClock.sleep(SETTLE_MS)
     }
 
+    /** Leaves the viewer: its back button on phones, system back in the side-by-side layout. */
+    fun closeViewer() {
+        if (exists(TestTags.BACK, 500)) tap(TestTags.BACK) else back()
+    }
+
     fun back() {
         device.pressBack()
         SystemClock.sleep(SETTLE_MS)
