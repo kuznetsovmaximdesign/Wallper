@@ -30,7 +30,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Unit tests, lint and release APK
-        run: ./gradlew --stacktrace testDebugUnitTest lintRelease assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest lintRelease assembleRelease 2>&1 | tee build.log || {
+            echo "===== ERRORS ====="
+            grep -E "^e: |error:|What went wrong|Lint found|FAILED|Exception:|requires " -A3 build.log | grep -v "^\s*at " | head -120
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -93,7 +99,13 @@ jobs:
           scripts/make-test-videos.sh
 
       - name: Build test APKs
-        run: ./gradlew --stacktrace assembleDebug assembleDebugAndroidTest
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug assembleDebugAndroidTest 2>&1 | tee build.log || {
+            echo "===== ERRORS ====="
+            grep -E "^e: |error:|What went wrong|Lint found|FAILED|Exception:|requires " -A3 build.log | grep -v "^\s*at " | head -120
+            exit 1
+          }
 
       - name: UI tests on emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -106,7 +118,7 @@ jobs:
           disk-size: 6000M
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: ./gradlew --stacktrace connectedDebugAndroidTest
+          script: ./gradlew connectedDebugAndroidTest
 
       - uses: actions/upload-artifact@v4
         if: always()
