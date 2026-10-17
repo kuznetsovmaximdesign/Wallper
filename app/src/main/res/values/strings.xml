@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wallper</string>
+    <string name="wallpaper_label">Wallper — видеообои</string>
+    <string name="wallpaper_description">Бесшовные 4K-видеообои с регулировкой скорости</string>
+
+    <string name="home_title">Wallper</string>
+    <string name="home_subtitle">Видеообои в 4K</string>
+    <string name="tab_apple">Apple Aerials</string>
+    <string name="tab_mine">Мои обои</string>
+    <string name="category_all">Все</string>
+    <string name="category_landscapes">Пейзажи</string>
+    <string name="category_underwater">Под водой</string>
+    <string name="category_space">Космос</string>
+    <string name="category_cities">Города</string>
+
+    <string name="catalog_loading">Загружаем каталог Apple…</string>
+    <string name="catalog_error">Не удалось загрузить каталог. Проверьте интернет.</string>
+    <string name="action_retry">Повторить</string>
+    <string name="library_empty_title">Здесь будут ваши обои</string>
+    <string name="library_empty_body">Выберите видео Apple или добавьте своё — до 30 секунд, без потери качества.</string>
+    <string name="action_import">Добавить своё видео</string>
+    <string name="badge_active">На экране</string>
+    <string name="badge_preparing">Готовим</string>
+
+    <string name="preview_mode_lock">Блокировка</string>
+    <string name="preview_mode_home">Рабочий стол</string>
+    <string name="preview_mode_clean">Без интерфейса</string>
+    <string name="preview_hint_focus">Перетащите кадр, чтобы выбрать композицию</string>
+
+    <string name="editor_fragment">Фрагмент</string>
+    <string name="editor_speed">Скорость</string>
+    <string name="editor_loop">Бесшовная петля</string>
+    <string name="editor_loop_hint">Плавный переход в конце, без рывка</string>
+    <string name="editor_loop_length">Цикл %1$s</string>
+    <string name="action_create">Скачать в 4K и установить</string>
+    <string name="action_create_local">Создать обои</string>
+    <string name="action_set">Установить обои</string>
+    <string name="action_applied">Установлено</string>
+    <string name="action_delete">Удалить</string>
+    <string name="action_undo">Отменить</string>
+    <string name="action_back">Назад</string>
+    <string name="action_settings">Настройки</string>
+    <string name="export_progress">Готовим 4K · %1$d%%</string>
+    <string name="export_failed">Не получилось подготовить видео</string>
+    <string name="toast_applied">Обои установлены</string>
+    <string name="toast_updated">Обои обновлены</string>
+    <string name="toast_deleted">Обои удалены</string>
+    <string name="toast_ready">Видеообои готовы</string>
+    <string name="select_placeholder">Выберите видео слева</string>
+
+    <string name="settings_title">Настройки</string>
+    <string name="settings_parallax">Параллакс</string>
+    <string name="settings_parallax_hint">Кадр смещается при листании рабочих столов</string>
+    <string name="settings_battery">Пауза при энергосбережении</string>
+    <string name="settings_battery_hint">Видео замирает, когда включено энергосбережение</string>
+    <string name="settings_storage">Обои занимают %1$s</string>
+    <string name="settings_about">Видео Apple Aerials загружаются напрямую с серверов Apple на ваше устройство для личного использования. Сохраняется только выбранный фрагмент — до 30 секунд, в исходном 4K-качестве без перекодирования.</string>
+
+    <string name="notification_channel">Подготовка обоев</string>
+    <string name="notification_title">Готовим видеообои</string>
+</resources>

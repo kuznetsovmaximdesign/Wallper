@@ -1,0 +1,54 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests, lint and release APK
+        run: ./gradlew --stacktrace testReleaseUnitTest lintRelease assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports
+          path: app/build/reports
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wallper-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Publish build
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Wallper build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          files: app/build/outputs/apk/release/*.apk
+          body: |
+            Видеообои Wallper, сборка из `${{ github.ref_name }}` (${{ github.sha }}).
+            Установите APK на телефон: он обновит предыдущую сборку.
