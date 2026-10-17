@@ -79,9 +79,7 @@ class GalleryTest {
         app.closeViewer()
         app.tap(TestTags.TAB_MINE)
         // The new clip is in "Mine" and its card comes alive too.
-        val clip = app.device.wait(Until.findObject(By.res(java.util.regex.Pattern.compile("card-.*"))), START_TIMEOUT_MS)
-        assertTrue("The installed clip must be listed in Mine", clip != null)
-        clip!!.click()
+        assertTrue("The installed clip must be listed in Mine", app.clickFirst("card-.*", START_TIMEOUT_MS))
         app.find(TestTags.VIEWER)
         Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "clip viewer")
         app.tap(TestTags.DOCK_FRAME)

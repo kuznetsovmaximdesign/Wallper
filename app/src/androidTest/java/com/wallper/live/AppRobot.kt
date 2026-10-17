@@ -1,6 +1,8 @@
 package com.wallper.live
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.UiAutomation
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
@@ -24,7 +26,7 @@ class AppRobot {
         // Video never idles: do not wait for an idle UI before each action.
         Configurator.getInstance().setWaitForIdleTimeout(0).setActionAcknowledgmentTimeout(500)
         if (Build.VERSION.SDK_INT >= 33) {
-            instrumentation.uiAutomation.grantRuntimePermission(packageName, Manifest.permission.POST_NOTIFICATIONS)
+            automation().grantRuntimePermission(packageName, Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
@@ -46,6 +48,7 @@ class AppRobot {
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
+            reportViewIds()
             device.findObject(By.res(tag))?.let { return it }
             dismissSystemDialog()
             SystemClock.sleep(250)
@@ -95,6 +98,32 @@ class AppRobot {
         SystemClock.sleep(SETTLE_MS)
     }
 
+    /** Clicks the first element whose tag matches [pattern], retrying while the UI changes under it. */
+    fun clickFirst(pattern: String, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            reportViewIds()
+            val found = device.findObject(By.res(java.util.regex.Pattern.compile(pattern)))
+            if (found != null && runCatching { found.click() }.isSuccess) {
+                SystemClock.sleep(SETTLE_MS)
+                return true
+            }
+            SystemClock.sleep(250)
+        }
+        return false
+    }
+
+    /** Waits until the viewer's title differs from [old]; returns the new one. */
+    fun awaitTitleChange(old: String, timeoutMs: Long = UI_TIMEOUT_MS): String {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        var current = title()
+        while (current == old && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(250)
+            current = title()
+        }
+        return current
+    }
+
     /** Scrolls the gallery until [tag] is on screen. */
     fun scrollTo(tag: String): UiObject2 {
         repeat(6) {
@@ -122,11 +151,14 @@ class AppRobot {
 
     fun title(): String = find(TestTags.TITLE).text.orEmpty()
 
+    /** A deliberate horizontal swipe, above the paging arrows at the sides' centre. */
     fun swipeVideo(towardsLeft: Boolean) {
         val b = findVisible(TestTags.VIDEO).visibleBounds
-        val y = b.centerY()
-        val (from, to) = if (towardsLeft) b.right - b.width() / 8 to b.left + b.width() / 8 else b.left + b.width() / 8 to b.right - b.width() / 8
-        device.swipe(from, y, to, y, 25)
+        val y = b.top + b.height() * 3 / 10
+        val right = b.right - b.width() * 3 / 10
+        val left = b.left + b.width() / 10
+        val (from, to) = if (towardsLeft) right to left else left to right
+        device.swipe(from, y, to, y, 40)
         SystemClock.sleep(900)
     }
 
@@ -156,6 +188,23 @@ class AppRobot {
     }
 
     companion object {
+        /**
+         * The one UiAutomation everything uses. Asking for it with other flags (e.g. for a
+         * screenshot) reconnects it and silently drops view ids, so tags stop being found.
+         */
+        fun automation(): UiAutomation = InstrumentationRegistry.getInstrumentation()
+            .getUiAutomation(Configurator.getInstance().uiAutomationFlags)
+
+        /** Compose exposes test tags as view ids only while the service asks for them. */
+        fun reportViewIds() {
+            val automation = automation()
+            val info = automation.serviceInfo ?: return
+            if (info.flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS == 0) {
+                info.flags = info.flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                automation.serviceInfo = info
+            }
+        }
+
         const val LAUNCH_TIMEOUT_MS = 30_000L
         const val UI_TIMEOUT_MS = 10_000L
         const val SETTLE_MS = 400L

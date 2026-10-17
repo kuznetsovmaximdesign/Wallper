@@ -5,7 +5,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
-import androidx.test.platform.app.InstrumentationRegistry
 import kotlin.math.abs
 import kotlin.math.sqrt
 import org.junit.Assert.fail
@@ -31,7 +30,7 @@ object Screen {
     fun shot(): Bitmap {
         // A screenshot can fail while windows change (e.g. the wallpaper picker closing).
         repeat(10) {
-            val raw = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+            val raw = AppRobot.automation().takeScreenshot()
             if (raw != null) {
                 return if (raw.config == Bitmap.Config.HARDWARE) raw.copy(Bitmap.Config.ARGB_8888, false) else raw
             }

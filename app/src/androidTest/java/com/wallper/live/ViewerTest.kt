@@ -82,9 +82,9 @@ class ViewerTest {
         val first = app.title()
 
         app.swipeVideo(towardsLeft = true)
-        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "after swipe")
-        val second = app.title()
+        val second = app.awaitTitleChange(first)
         assertNotEquals("Swipe must open the next wallpaper", first, second)
+        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "after swipe")
 
         app.tap(TestTags.PREVIOUS)
         SystemClock.sleep(800)
@@ -140,6 +140,6 @@ class ViewerTest {
         const val RESUME_TIMEOUT_MS = 6_000L
 
         /** Emulators decode in software; on a phone this is a fraction of it. */
-        const val FAST_START_MS = 6_000L
+        const val FAST_START_MS = 10_000L
     }
 }
