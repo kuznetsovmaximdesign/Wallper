@@ -11,6 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -121,6 +122,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
         edit.spec(Uri.parse(footage.masterUrl), highFrameRate = true)
     }
     var framing by remember { mutableStateOf(false) }
+    LaunchedEffect(footage.id) { framing = false } // swiping must always mean "next wallpaper"
     val pager = rememberViewerPager(items, footage.id, { it.id }) { actions.onOpen(EditorTarget.FromFootage(it)) }
 
     ViewerFrame(
@@ -177,6 +179,7 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
     var speed by remember(clip.id) { mutableFloatStateOf(state.settings.speedOf(clip.id)) }
     var focus by remember(clip.id) { mutableStateOf(state.settings.focusOf(clip.id)) }
     var framing by remember { mutableStateOf(false) }
+    LaunchedEffect(clip.id) { framing = false } // swiping must always mean "next wallpaper"
 
     // Persist framing shortly after the finger lifts.
     LaunchedEffect(clip.id, focus) {
@@ -450,6 +453,17 @@ private fun ViewerFrame(
     val scope = rememberCoroutineScope()
     Box(modifier.fillMaxSize().background(Color.Black)) {
         pager()
+
+        // Framing mode is unmistakable: the screen gets a frame, dragging moves the picture.
+        AnimatedVisibility(framing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.matchParentSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(8.dp)
+                    .border(2.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(28.dp)),
+            )
+        }
 
         // Visible paging affordances: arrows on the sides and a one-time swipe hint.
         if (pagerState != null && pageCount > 1 && !framing) {
