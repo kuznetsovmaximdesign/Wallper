@@ -5,13 +5,24 @@ set -uo pipefail
 # The CDN omits its intermediate certificate; complete the chain via AIA (as browsers
 # do) and keep full verification against the system roots.
 work=$(mktemp -d); cd "$work"
+openssl s_client -connect sylvan.apple.com:443 -servername sylvan.apple.com -showcerts </dev/null 2>/dev/null \
+  | grep -E "^ ?[0-9] s:|i:|Verify return" | head -12
 leaf=$(openssl s_client -connect sylvan.apple.com:443 -servername sylvan.apple.com </dev/null 2>/dev/null | openssl x509)
+echo "$leaf" | openssl x509 -noout -subject -issuer -dates -ext authorityInfoAccess,subjectAltName 2>&1 | head -20
 aia=$(echo "$leaf" | openssl x509 -noout -ext authorityInfoAccess | sed -n 's/.*CA Issuers - URI:\(.*\)/\1/p' | head -1)
 echo "AIA issuer: $aia"
-curl -sf "$aia" -o issuer.der && openssl x509 -inform DER -in issuer.der -out issuer.pem
 echo "$leaf" > leaf.pem
-openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt -untrusted issuer.pem leaf.pem || exit 1
-cat /etc/ssl/certs/ca-certificates.crt issuer.pem > bundle.pem
+if [ -n "$aia" ] && curl -sf "$aia" -o issuer.der && openssl x509 -inform DER -in issuer.der -out issuer.pem; then
+  openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt -untrusted issuer.pem leaf.pem || exit 1
+  cat /etc/ssl/certs/ca-certificates.crt issuer.pem > bundle.pem
+else
+  echo "no usable AIA; trying system store as-is"
+  openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt leaf.pem
+  cp /etc/ssl/certs/ca-certificates.crt bundle.pem
+fi
+for host in configuration.apple.com sylvan.apple.com; do
+  echo "--- curl strict $host"; curl -sS -o /dev/null -w "%{http_code}\n" "https://$host/" 2>&1 | head -2
+done
 
 for v in 26-0 27-0 15-0; do
   echo "=== resources-config-$v.plist"
