@@ -14,5 +14,11 @@ jobs:
           curl -sfL -o m3.jar $G/androidx/compose/material3/material3-android/1.5.0-beta01/material3-android-1.5.0-beta01-sources.jar || echo "no sources jar"
           unzip -q -o m3.jar || true
           sig() { grep -rhn -A "$2" --include=*.kt -E "$1" . | grep -v '^\S*-\s*\*' | head -${3:-60}; echo "-----"; }
-          sig '^public fun (HorizontalFloatingToolbar|SplitButtonLayout|ToggleButton|TonalToggleButton|LoadingIndicator|ContainedLoadingIndicator|MaterialExpressiveTheme|CircularWavyProgressIndicator|FilledTonalIconButton|FilledIconToggleButton)\(' 24 700
-          grep -rn "class ToggleButtonSize\|val size: ToggleButtonSize\|ExtraSmallContainerHeight: Dp\|val MinHeight\|SmallContainerHeight" --include=*.kt . | head -20
+          grep -n -A 22 "^public fun HorizontalFloatingToolbar(" commonMain/androidx/compose/material3/FloatingToolbar.kt | grep -v "^\S*-\s*\*" | head -80
+          echo -----
+          grep -rn -B2 -A 14 "class ToggleButtonColors" --include=*.kt . | head -40
+          grep -rn -A 12 "fun toggleButtonColors\|fun colors(" commonMain/androidx/compose/material3/ToggleButton.kt | head -40
+          echo -----
+          grep -rn -A 10 "fun filledTonalIconButtonColors(" --include=*.kt . | head -30
+          grep -rn "fun ListItem(" --include=*.kt . | head
+          grep -rn -A 14 "^public fun ListItem(" commonMain/androidx/compose/material3/ListItem.kt | head -40
