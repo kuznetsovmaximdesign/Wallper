@@ -142,6 +142,7 @@ jobs:
           $adb shell wm dismiss-keyguard
           $adb shell input keyevent 82
           $adb shell settings put secure lockscreen.disabled 1 || true
+          sleep 20 # let the system settle after boot before testing
           if [ -n "${{ matrix.screen }}" ]; then $adb shell wm size ${{ matrix.screen }}; $adb shell wm density 360; fi
           echo "Emulator ready"
 

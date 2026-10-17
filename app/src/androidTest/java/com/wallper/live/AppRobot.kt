@@ -13,7 +13,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import com.wallper.live.ui.components.TestTags
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.fail
 
 /** Drives the real app through UI Automator: taps, swipes and waits like a person would. */
 class AppRobot {
@@ -45,9 +45,26 @@ class AppRobot {
     }
 
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
-        val found = device.wait(Until.findObject(By.res(tag)), timeoutMs)
-        assertNotNull("No element '$tag' on screen (in front: ${device.currentPackageName})", found)
-        return found!!
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            device.findObject(By.res(tag))?.let { return it }
+            dismissSystemDialog()
+            SystemClock.sleep(250)
+        }
+        val visibleText = device.findObjects(By.textStartsWith("")).mapNotNull { it.text }.take(12)
+        fail("No element '$tag' on screen (in front: ${device.currentPackageName}, text: $visibleText)")
+        error("unreachable")
+    }
+
+    /**
+     * Slow emulators raise "isn't responding" dialogs for system apps; they would hide
+     * the app under test. Our own app reporting one is a real failure.
+     */
+    private fun dismissSystemDialog() {
+        val dialog = device.findObject(By.res("android:id/aerr_wait")) ?: return
+        val message = device.findObject(By.res("android:id/alertTitle"))?.text.orEmpty()
+        if (message.contains("Wallper", ignoreCase = true)) error("The app is not responding: $message")
+        dialog.click()
     }
 
     fun exists(tag: String, timeoutMs: Long = 1_000): Boolean = device.wait(Until.hasObject(By.res(tag)), timeoutMs)
