@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -75,6 +76,7 @@ import kotlinx.coroutines.launch
 fun WallperRoot(vm: MainViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val resources = LocalResources.current
     val view = LocalView.current
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -125,7 +127,7 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
         if (System.currentTimeMillis() - pending.second < FOLD_FOLLOW_UP_MS) {
             foldFollowUp = true
             openPicker()
-            snackbar.showSnackbar(context.getString(R.string.fold_other_screen), duration = SnackbarDuration.Short)
+            snackbar.showSnackbar(resources.getString(R.string.fold_other_screen), duration = SnackbarDuration.Short)
         }
     }
 
@@ -136,8 +138,8 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
                 is UiEvent.Message -> scope.launch {
                     if (event.text == R.string.toast_applied || event.text == R.string.toast_updated) Haptics.confirm(view)
                     val result = snackbar.showSnackbar(
-                        message = context.getString(event.text),
-                        actionLabel = event.actionLabel?.let(context::getString),
+                        message = resources.getString(event.text),
+                        actionLabel = event.actionLabel?.let { resources.getString(it) },
                         duration = if (event.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
                     )
                     val action = event.action
@@ -158,7 +160,7 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
             vm.createFromFootage(footage, start, loop, speed, focus, target)
         },
         onCreateFromDevice = { uri, start, loop, speed, focus, target ->
-            vm.createFromDevice(uri, context.getString(R.string.tab_mine), start, loop, speed, focus, target)
+            vm.createFromDevice(uri, resources.getString(R.string.tab_mine), start, loop, speed, focus, target)
         },
         onApply = { clip, target -> vm.apply(clip, target) },
         onDelete = vm::requestDelete,
