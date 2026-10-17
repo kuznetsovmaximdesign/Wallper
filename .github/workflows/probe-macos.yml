@@ -1,0 +1,16 @@
+name: Probe macOS Aerials (metadata)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_macos_aerials.sh
+      - .github/workflows/probe-macos.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - run: scripts/probe_macos_aerials.sh
