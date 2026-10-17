@@ -1,6 +1,7 @@
 package com.wallper.live.media
 
 import android.media.MediaCodecList
+import android.media.MediaExtractor
 import android.media.MediaFormat
 import java.nio.ByteBuffer
 
@@ -65,6 +66,41 @@ object HevcTemporalLayers {
         }
         return best
     }
+
+    /**
+     * For HEVC above the device's playable rate, scans ~2 s of samples from [startUs]
+     * to learn the temporal-layer layout and returns the highest layer to keep;
+     * [Int.MAX_VALUE] keeps everything. Leaves the extractor at an undefined position.
+     */
+    fun scanMaxLayer(extractor: MediaExtractor, format: MediaFormat, startUs: Long, capFps: Double = 60.0): Int {
+        if (format.getString(MediaFormat.KEY_MIME) != MediaFormat.MIMETYPE_VIDEO_HEVC) return Int.MAX_VALUE
+        val capacity = maxOf(
+            if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) else 0,
+            SCAN_BUFFER,
+        )
+        val buffer = ByteBuffer.allocateDirect(capacity)
+        extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        val counts = HashMap<Int, Int>()
+        val times = ArrayList<Long>(SCAN_SAMPLES)
+        while (times.size < SCAN_SAMPLES) {
+            val size = extractor.readSampleData(buffer, 0)
+            if (size < 0) break
+            times += extractor.sampleTime
+            buffer.position(0)
+            val tid = temporalId(buffer, size) ?: 0
+            counts[tid] = (counts[tid] ?: 0) + 1
+            extractor.advance()
+        }
+        if (times.size < 2 || counts.size < 2) return Int.MAX_VALUE
+        times.sort()
+        val spanUs = (times.last() - times.first()).coerceAtLeast(1)
+        val sourceFps = (times.size - 1) * 1_000_000.0 / spanUs
+        val target = minOf(playableFps(format), capFps)
+        return if (sourceFps > target + 1) maxLayerFor(counts, sourceFps, target) else Int.MAX_VALUE
+    }
+
+    private const val SCAN_SAMPLES = 480
+    private const val SCAN_BUFFER = 12 shl 20
 
     /** The highest frame rate (60 or 30) the device can decode at this resolution. */
     fun playableFps(format: MediaFormat): Double {

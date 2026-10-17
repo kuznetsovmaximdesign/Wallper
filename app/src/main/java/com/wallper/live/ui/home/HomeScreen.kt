@@ -63,7 +63,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import com.wallper.live.R
 import com.wallper.live.WallperApplication
@@ -74,12 +73,12 @@ import com.wallper.live.core.WallpaperRole
 import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.core.formatDuration
 import com.wallper.live.data.catalog.CatalogState
+import com.wallper.live.playback.LoopSpec
 import com.wallper.live.ui.HomeTab
 import com.wallper.live.ui.MainUiState
 import com.wallper.live.ui.components.GlassSurface
 import com.wallper.live.ui.components.InlineVideo
 import com.wallper.live.ui.components.pressScale
-import com.wallper.live.ui.components.rememberPreviewPlayer
 import com.wallper.live.ui.components.shimmer
 import com.wallper.live.work.ExportJob
 
@@ -103,7 +102,6 @@ fun HomeScreen(
 ) {
     val insets = WindowInsets.safeDrawing.asPaddingValues()
     val gridState = rememberLazyGridState()
-    val player = rememberPreviewPlayer()
     val mediaIds = remember(state.tab, state.visibleFootage, state.clips) {
         if (state.tab == HomeTab.Apple) {
             state.visibleFootage.mapTo(HashSet()) { it.id }
@@ -132,8 +130,8 @@ fun HomeScreen(
         ) {
             fullWidth("header") { Header(state.tab, onSettings) }
             when (state.tab) {
-                HomeTab.Apple -> appleTab(state, onCategory, onRetry, onFootage, selectedId, playingId, player)
-                HomeTab.Mine -> mineTab(state, onClip, selectedId, playingId, player)
+                HomeTab.Apple -> appleTab(state, onCategory, onRetry, onFootage, selectedId, playingId)
+                HomeTab.Mine -> mineTab(state, onClip, selectedId, playingId)
             }
         }
 
@@ -191,7 +189,6 @@ private fun LazyGridScope.appleTab(
     onFootage: (Footage) -> Unit,
     selectedId: String?,
     playingId: String?,
-    player: ExoPlayer,
 ) {
     fullWidth("categories") { Categories(state.category, onCategory) }
     when (state.catalog) {
@@ -210,13 +207,13 @@ private fun LazyGridScope.appleTab(
             val hero = all.firstOrNull()
             if (hero != null) {
                 item(key = hero.id, span = { GridItemSpan(maxLineSpan) }) {
-                    FootageCard(hero, state, hero.id == selectedId, hero.id == playingId, player, hero = true) {
+                    FootageCard(hero, state, hero.id == selectedId, hero.id == playingId, hero = true) {
                         onFootage(hero)
                     }
                 }
             }
             items(all.drop(1), key = { it.id }) { footage ->
-                FootageCard(footage, state, footage.id == selectedId, footage.id == playingId, player) {
+                FootageCard(footage, state, footage.id == selectedId, footage.id == playingId) {
                     onFootage(footage)
                 }
             }
@@ -229,7 +226,6 @@ private fun LazyGridScope.mineTab(
     onClip: (Clip) -> Unit,
     selectedId: String?,
     playingId: String?,
-    player: ExoPlayer,
 ) {
     state.exports.filter { it.state == ExportJob.State.Running && it.footageId == null }.forEach { job ->
         item(key = "job-${job.id}") {
@@ -239,7 +235,7 @@ private fun LazyGridScope.mineTab(
         }
     }
     items(state.clips, key = { it.id }) { clip ->
-        ClipCard(clip, state.rolesOf(clip), clip.id == selectedId, clip.id == playingId, player) { onClip(clip) }
+        ClipCard(clip, state.rolesOf(clip), clip.id == selectedId, clip.id == playingId) { onClip(clip) }
     }
     if (state.clips.isEmpty()) {
         fullWidth("empty") {
@@ -304,19 +300,19 @@ private fun FootageCard(
     state: MainUiState,
     selected: Boolean,
     playing: Boolean,
-    player: ExoPlayer,
     hero: Boolean = false,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
-    var cover by remember(footage.id) { mutableStateOf<Any?>(footage.coverUrl ?: covers.cached(footage)) }
-    LaunchedEffect(footage.id) { if (cover == null) cover = covers.cover(footage) }
+    // Apple's small still appears instantly; a sharp frame cut from the video replaces it.
+    var cover by remember(footage.id) { mutableStateOf<Any?>(covers.cached(footage) ?: footage.coverUrl) }
+    LaunchedEffect(footage.id) {
+        if (covers.cached(footage) == null) covers.cover(footage)?.let { cover = it }
+    }
     MediaCard(
         cover = cover,
-        video = footage.previewUrl?.takeIf { playing },
-        videoStartMs = PREVIEW_START_MS,
-        player = player,
+        video = if (playing) footage.inlineSpec() else null,
         title = footage.title,
         caption = footage.collection?.takeIf { it != footage.title },
         selected = selected,
@@ -332,16 +328,13 @@ private fun ClipCard(
     roles: Set<WallpaperRole>,
     selected: Boolean,
     playing: Boolean,
-    player: ExoPlayer,
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
     val library = remember(context) { (context.applicationContext as WallperApplication).container.library }
     MediaCard(
         cover = library.coverOf(clip),
-        video = if (playing) Uri.fromFile(library.fileOf(clip)).toString() else null,
-        videoStartMs = 0,
-        player = player,
+        video = if (playing) LoopSpec(Uri.fromFile(library.fileOf(clip)), clip.loopMs, clip.fadeMs) else null,
         title = clip.title,
         caption = (if (clip.isUhd) "4K · " else "") + formatDuration(clip.loopMs),
         selected = selected,
@@ -362,9 +355,7 @@ private fun ClipCard(
 @Composable
 private fun MediaCard(
     cover: Any?,
-    video: String?,
-    videoStartMs: Long,
-    player: ExoPlayer,
+    video: LoopSpec?,
     title: String,
     caption: String?,
     selected: Boolean,
@@ -391,7 +382,7 @@ private fun MediaCard(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (video != null) InlineVideo(player, video, startMs = videoStartMs)
+        if (video != null) InlineVideo(video)
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -490,5 +481,23 @@ private fun ProgressBadge(progress: Float) {
 private const val CARD_RATIO = 9f / 16f
 private const val HERO_RATIO = 4f / 5f
 private const val PREVIEW_START_MS = 30_000L
+private const val PREVIEW_LENGTH_MS = 20_000L
+
+/**
+ * What a card plays in place: Apple's light stream when there is one, otherwise the
+ * 4K 240 fps master through the layer-dropping decoder, capped at 30 fps for a card.
+ */
+private fun Footage.inlineSpec(): LoopSpec {
+    val light = previewUrl
+    return LoopSpec(
+        uri = Uri.parse(light ?: masterUrl),
+        loopMs = PREVIEW_LENGTH_MS,
+        fadeMs = 0,
+        clipStartMs = PREVIEW_START_MS,
+        clipEndMs = PREVIEW_START_MS + PREVIEW_LENGTH_MS,
+        highFrameRate = light == null && highFrameRate,
+        maxFps = 30.0,
+    )
+}
 private val CardShape = RoundedCornerShape(24.dp)
 private val HeroShape = RoundedCornerShape(32.dp)

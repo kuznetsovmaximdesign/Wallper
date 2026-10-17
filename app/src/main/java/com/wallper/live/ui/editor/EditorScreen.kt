@@ -55,7 +55,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.MediaItem
 import coil3.compose.AsyncImage
 import com.wallper.live.R
 import com.wallper.live.WallperApplication
@@ -67,7 +66,7 @@ import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.core.WallpaperTarget
 import com.wallper.live.core.formatDuration
 import com.wallper.live.media.ClipSource
-import com.wallper.live.playback.LoopSession
+import com.wallper.live.playback.LoopSpec
 import com.wallper.live.ui.EditorTarget
 import com.wallper.live.ui.MainUiState
 import com.wallper.live.ui.components.GlassSurface
@@ -103,9 +102,18 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
 
 @Composable
 private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorActions, modifier: Modifier) {
+    val context = LocalContext.current
+    val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
     val items = state.visibleFootage.takeIf { list -> list.any { it.id == footage.id } } ?: listOf(footage)
     val edit = rememberSourceEdit(footage.id, ClipSource.Remote(footage.previewUrl ?: footage.masterUrl))
-    val spec = edit.spec(footage.previewUrl?.let(Uri::parse))
+    // Light 1080p stream when Apple has one; otherwise the 4K 240 fps master, played by
+    // the layer-dropping decoder at 60/30 fps.
+    val preview = footage.previewUrl
+    val spec = if (preview != null) {
+        edit.spec(Uri.parse(preview), highFrameRate = false)
+    } else {
+        edit.spec(Uri.parse(footage.masterUrl), highFrameRate = true)
+    }
     var framing by remember { mutableStateOf(false) }
 
     ViewerFrame(
@@ -118,8 +126,8 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
             ViewerPager(items, footage.id, { it.id }, { actions.onOpen(EditorTarget.FromFootage(it)) }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) spec else null,
-                    still = item.coverUrl,
-                    animateStill = active && item.previewUrl == null,
+                    still = covers.cached(item) ?: item.coverUrl,
+                    animateStill = false,
                     state = state,
                     speed = edit.speed,
                     focus = if (active) edit.focus else Focus.Center,
@@ -178,8 +186,8 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
             ViewerPager(state.clips, clip.id, { it.id }, { actions.onOpen(EditorTarget.FromClip(it.id)) }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) {
-                        LoopSession.LoopSpec(
-                            mediaItem = MediaItem.fromUri(Uri.fromFile(library.fileOf(item))),
+                        LoopSpec(
+                            uri = Uri.fromFile(library.fileOf(item)),
                             loopMs = item.loopMs,
                             fadeMs = item.fadeMs,
                         )
@@ -220,7 +228,7 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
 @Composable
 private fun DeviceViewer(uri: Uri, state: MainUiState, actions: EditorActions, modifier: Modifier) {
     val edit = rememberSourceEdit(uri.toString(), ClipSource.Local(uri))
-    val spec = edit.spec(uri)
+    val spec = edit.spec(uri, highFrameRate = false)
     var framing by remember { mutableStateOf(false) }
     ViewerFrame(
         modifier = modifier,
@@ -280,21 +288,15 @@ private class SourceEdit {
     }
 
     /** Preview loop of the committed fragment, streamed from [uri]. */
-    fun spec(uri: Uri?): LoopSession.LoopSpec? {
+    fun spec(uri: Uri, highFrameRate: Boolean): LoopSpec? {
         val (start, loop) = committed ?: return null
-        uri ?: return null
-        return LoopSession.LoopSpec(
-            mediaItem = MediaItem.Builder()
-                .setUri(uri)
-                .setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(start)
-                        .setEndPositionMs(start + loop + Playback.FADE_MS)
-                        .build(),
-                )
-                .build(),
+        return LoopSpec(
+            uri = uri,
             loopMs = loop,
             fadeMs = Playback.FADE_MS,
+            clipStartMs = start,
+            clipEndMs = start + loop + Playback.FADE_MS,
+            highFrameRate = highFrameRate,
         )
     }
 }
@@ -352,7 +354,7 @@ private fun <T> ViewerPager(
 
 @Composable
 private fun VideoPage(
-    spec: LoopSession.LoopSpec?,
+    spec: LoopSpec?,
     still: Any?,
     animateStill: Boolean,
     state: MainUiState,
@@ -369,7 +371,7 @@ private fun VideoPage(
                 speed = speed,
                 focus = focus,
                 frostReveal = state.settings.frostReveal,
-                revealKey = spec.mediaItem.localConfiguration?.uri,
+                revealKey = spec.uri,
                 onFocusChange = onFocus,
                 modifier = Modifier.fillMaxSize(),
             )

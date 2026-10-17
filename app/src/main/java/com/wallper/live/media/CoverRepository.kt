@@ -14,8 +14,9 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 /**
- * Covers for catalog footage, cut on the device from the preview stream with range
- * requests (a single key frame plus the index, a few hundred KB) and cached on disk.
+ * Sharp covers for catalog footage, cut on the device from the video itself (one key
+ * frame plus the index via range requests) at up to 2560 px and cached on disk.
+ * Apple's published stills are small, so they only serve as instant placeholders.
  */
 class CoverRepository(
     private val http: OkHttpClient,
@@ -32,7 +33,8 @@ class CoverRepository(
         val existing = inFlight.putIfAbsent(footage.id, deferred)
         if (existing != null) return existing.await()
         val result = permits.withPermit {
-            listOfNotNull(footage.previewUrl, footage.masterUrl).distinct().firstNotNullOfOrNull { url ->
+            // The 4K master gives the sharpest frame; the 1080p stream is the fallback.
+            listOfNotNull(footage.masterUrl, footage.previewUrl).distinct().firstNotNullOfOrNull { url ->
                 runCatching { render(footage, url) }.getOrNull()
             }
         }
@@ -56,7 +58,7 @@ class CoverRepository(
             val target = fileOf(footage)
             directory.mkdirs()
             val tmp = File(directory, "${footage.id}.tmp")
-            FileOutputStream(tmp).use { frame.compress(Bitmap.CompressFormat.JPEG, 86, it) }
+            FileOutputStream(tmp).use { frame.compress(Bitmap.CompressFormat.JPEG, 92, it) }
             frame.recycle()
             tmp.renameTo(target)
             target
@@ -65,10 +67,10 @@ class CoverRepository(
         }
     }
 
-    private fun fileOf(footage: Footage) = File(directory, "${footage.id}.jpg")
+    private fun fileOf(footage: Footage) = File(directory, "v2-${footage.id}.jpg")
 
     private companion object {
-        const val PARALLEL = 3
-        const val MAX_SIDE = 960
+        const val PARALLEL = 2
+        const val MAX_SIDE = 2560
     }
 }

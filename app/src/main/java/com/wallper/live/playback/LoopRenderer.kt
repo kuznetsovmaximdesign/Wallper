@@ -52,7 +52,15 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
 
     /** Latest hinge angle in degrees (180 = flat/open, 0 = closed). */
     @Volatile private var hingeTarget = 180f
+    @Volatile private var hingeSnap: Float? = null
     private var hinge = 180f
+    private var hingeVelocity = 0f
+
+    /**
+     * Coarse sensors (Samsung reports only 0/90/180°) need a softer spring so the
+     * jumps between stops turn into one smooth motion.
+     */
+    @Volatile var hingeCoarse = false
     private var lastFrameNanos = 0L
     @Volatile private var revealRequested = false
     private var revealStartNanos = 0L
@@ -111,6 +119,13 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     fun reveal() {
         if (!revealEnabled) return
         revealRequested = true
+        requestRender()
+    }
+
+    /** Jumps straight to [degrees] (e.g. when a panel lights up mid-unfold). */
+    fun snapHinge(degrees: Float) {
+        hingeTarget = degrees.coerceIn(0f, 180f)
+        hingeSnap = hingeTarget
         requestRender()
     }
 
@@ -260,21 +275,42 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     }
 
     /**
-     * Eases the displayed hinge angle towards the sensor value (hides 1° steps and
-     * turns Samsung's 0/90/180° stops into motion) and returns the fold amount 0..1.
+     * Moves the displayed hinge angle towards the sensor value with a critically damped
+     * spring: it starts and settles softly, hides 1° sensor steps and turns Samsung's
+     * 0/90/180° stops into one continuous motion. Returns the fold amount 0..1.
      */
     private fun updateFold(): Float {
         val now = System.nanoTime()
-        val dt = if (lastFrameNanos == 0L) 0f else ((now - lastFrameNanos) / 1e9f).coerceAtMost(0.1f)
+        val dt = if (lastFrameNanos == 0L) 0f else ((now - lastFrameNanos) / 1e9f).coerceAtMost(0.05f)
         lastFrameNanos = now
+        hingeSnap?.let {
+            hinge = it
+            hingeVelocity = 0f
+            hingeSnap = null
+        }
         val target = if (revealEnabled && panel != PanelKind.Regular) hingeTarget else 180f
-        hinge += (target - hinge) * (1f - kotlin.math.exp(-dt / HINGE_TAU))
-        if (abs(target - hinge) > 0.2f) requestRender() else hinge = target
-        return when (panel) {
+        val omega = if (hingeCoarse) COARSE_OMEGA else FINE_OMEGA
+        // Semi-implicit Euler in small steps keeps the spring stable at any frame rate.
+        var remaining = dt
+        while (remaining > 0f) {
+            val h = minOf(remaining, 1f / 240f)
+            val acceleration = -2f * omega * hingeVelocity - omega * omega * (hinge - target)
+            hingeVelocity += acceleration * h
+            hinge += hingeVelocity * h
+            remaining -= h
+        }
+        if (abs(target - hinge) > 0.05f || abs(hingeVelocity) > 0.5f) {
+            requestRender()
+        } else {
+            hinge = target
+            hingeVelocity = 0f
+        }
+        val raw = when (panel) {
             PanelKind.Inner -> ((180f - hinge) / 150f).coerceIn(0f, 1f)
             PanelKind.Cover -> (hinge / 25f).coerceIn(0f, 1f)
             PanelKind.Regular -> 0f
         }
+        return raw * raw * (3f - 2f * raw) // smoothstep: no visible start/stop edges
     }
 
     /** Advances the reveal animation; it starts once a video frame is on screen. */
@@ -385,7 +421,8 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
         const val PARALLAX_RANGE = 0.6f
         const val REVEAL_NANOS = 950_000_000f
         const val REVEAL_HOLD_NANOS = 120_000_000L
-        const val HINGE_TAU = 0.12f
+        const val FINE_OMEGA = 16f   // ≈ 0.3 s to settle
+        const val COARSE_OMEGA = 9f  // ≈ 0.55 s across a 90° stop
         const val FOLD_EPSILON = 0.002f
 
         // Full-screen triangle generated from gl_VertexID: no vertex buffers needed.
@@ -450,6 +487,12 @@ float hash(vec2 p) {
     return fract((p3.x + p3.y) * p3.z);
 }
 
+const vec2 POISSON[12] = vec2[12](
+    vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621),
+    vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893),
+    vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598)
+);
+
 void main() {
     vec2 uv = (vUv - 0.5) / (1.0 + 0.07 * uAmount) + 0.5;
 
@@ -465,13 +508,21 @@ void main() {
     }
 
     float amount = max(uAmount, fold);
-    float lod = amount * 6.5;
-    vec2 r = uTexel * exp2(lod) * 0.75;
-    vec3 c = textureLod(uFrostTex, uv, lod).rgb * 0.36
-        + textureLod(uFrostTex, uv + vec2(r.x, r.y), lod).rgb * 0.16
-        + textureLod(uFrostTex, uv + vec2(-r.x, r.y), lod).rgb * 0.16
-        + textureLod(uFrostTex, uv + vec2(r.x, -r.y), lod).rgb * 0.16
-        + textureLod(uFrostTex, uv + vec2(-r.x, -r.y), lod).rgb * 0.16;
+    // Fractional mip level + a 12-tap Poisson disk rotated per pixel: a smooth, round
+    // blur without the blockiness of plain mip sampling, continuous as amount changes.
+    float lod = amount * 5.5;
+    float radius = exp2(lod) * 1.25;
+    float angle = hash(gl_FragCoord.xy) * 6.2831853;
+    mat2 spin = mat2(cos(angle), -sin(angle), sin(angle), cos(angle));
+    vec3 c = textureLod(uFrostTex, uv, lod).rgb;
+    float weight = 1.0;
+    for (int i = 0; i < 12; i++) {
+        vec2 o = spin * POISSON[i] * radius * uTexel;
+        float w = 1.0 - 0.5 * length(POISSON[i]);
+        c += textureLod(uFrostTex, uv + o, lod).rgb * w;
+        weight += w;
+    }
+    c /= weight;
     // Milky veil + gentle grain sell the "glass" rather than a plain blur.
     c = mix(c, vec3(0.92), 0.16 * uAmount + 0.10 * fold);
     c *= 1.0 - 0.42 * fold;

@@ -24,6 +24,7 @@ import com.wallper.live.WallperApplication
 import com.wallper.live.core.Focus
 import com.wallper.live.playback.LoopRenderer
 import com.wallper.live.playback.LoopSession
+import com.wallper.live.playback.LoopSpec
 
 /** GLSurfaceView hosting a [LoopRenderer]: the same pipeline the wallpaper uses. */
 @SuppressLint("ViewConstructor")
@@ -44,7 +45,7 @@ class LoopVideoView(context: Context) : GLSurfaceView(context) {
  */
 @Composable
 fun LoopVideo(
-    spec: LoopSession.LoopSpec?,
+    spec: LoopSpec?,
     seamless: Boolean,
     speed: Float,
     focus: Focus,

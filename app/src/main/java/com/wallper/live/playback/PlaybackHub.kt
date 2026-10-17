@@ -8,11 +8,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
-import androidx.media3.common.MediaItem
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.source.MediaSource
 import com.wallper.live.core.Clip
 import com.wallper.live.core.WallpaperRole
 import com.wallper.live.data.library.ClipLibrary
@@ -36,10 +32,9 @@ import kotlinx.coroutines.launch
  *    where it stopped.
  * Only one session (≤ 2 decoders) exists at a time. Main thread only.
  */
-@OptIn(UnstableApi::class)
 class PlaybackHub(
     private val context: Context,
-    private val mediaSourceFactory: MediaSource.Factory,
+    private val players: LoopPlayerFactory,
     private val library: ClipLibrary,
     private val settings: SettingsRepository,
     private val scope: CoroutineScope,
@@ -168,10 +163,9 @@ class PlaybackHub(
             val position = if (sessionKey?.clipId == clip.id) session?.positionMs else null
             releaseSession()
             session = LoopSession(
-                context = context,
-                mediaSourceFactory = mediaSourceFactory,
-                spec = LoopSession.LoopSpec(
-                    mediaItem = MediaItem.fromUri(Uri.fromFile(library.fileOf(clip))),
+                factory = players,
+                spec = LoopSpec(
+                    uri = Uri.fromFile(library.fileOf(clip)),
                     loopMs = clip.loopMs,
                     fadeMs = clip.fadeMs,
                 ),

@@ -2,11 +2,9 @@ package com.wallper.live
 
 import android.app.Application
 import androidx.annotation.OptIn
-import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.work.WorkManager
@@ -18,7 +16,9 @@ import com.wallper.live.media.ClipExporter
 import com.wallper.live.media.CoverRepository
 import com.wallper.live.media.MediaProbe
 import com.wallper.live.net.HttpClients
+import com.wallper.live.playback.LoopPlayerFactory
 import com.wallper.live.playback.LoopSession
+import com.wallper.live.playback.LoopSpec
 import com.wallper.live.playback.PlaybackHub
 import com.wallper.live.work.ExportScheduler
 import java.io.File
@@ -59,18 +59,10 @@ class AppContainer(private val app: Application) {
         DefaultMediaSourceFactory(DefaultDataSource.Factory(app, OkHttpDataSource.Factory(http)))
     }
 
-    val playbackHub by lazy { PlaybackHub(app, mediaSourceFactory, library, settings, mainScope) }
+    val loopPlayers by lazy { LoopPlayerFactory(app, mediaSourceFactory, http) }
 
-    /** A muted player for inline gallery previews (one shared instance per screen). */
-    fun newPreviewPlayer(): ExoPlayer = ExoPlayer.Builder(app)
-        .setMediaSourceFactory(mediaSourceFactory)
-        .build()
-        .apply {
-            volume = 0f
-            repeatMode = Player.REPEAT_MODE_ONE
-        }
+    val playbackHub by lazy { PlaybackHub(app, loopPlayers, library, settings, mainScope) }
 
     /** A standalone loop for in-app previews (not shared with the wallpaper). */
-    fun newLoopSession(spec: LoopSession.LoopSpec, seamless: Boolean): LoopSession =
-        LoopSession(app, mediaSourceFactory, spec, seamless)
+    fun newLoopSession(spec: LoopSpec, seamless: Boolean): LoopSession = LoopSession(loopPlayers, spec, seamless)
 }

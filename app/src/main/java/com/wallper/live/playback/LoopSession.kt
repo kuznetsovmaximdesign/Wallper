@@ -1,16 +1,6 @@
 package com.wallper.live.playback
 
-import android.content.Context
 import android.view.Choreographer
-import androidx.annotation.OptIn
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.MediaSource
 
 /**
  * Plays a clip as an endless loop.
@@ -19,7 +9,7 @@ import androidx.media3.exoplayer.source.MediaSource
  * picture plus a [LoopSpec.fadeMs] tail: when the front player reaches the loop point
  * the back player starts from 0 and the renderer cross-fades to it, so the seam is
  * invisible. Roles then swap. If a second decoder is unavailable the session falls
- * back to a single player with gapless repeat.
+ * back to a single repeating player.
  *
  * Decoder output surfaces belong to the attached [VideoTarget]; switching targets
  * (e.g. folding/unfolding a phone moves the wallpaper to another display) only swaps
@@ -27,28 +17,20 @@ import androidx.media3.exoplayer.source.MediaSource
  *
  * Must be used on the main thread.
  */
-@OptIn(UnstableApi::class)
 class LoopSession(
-    context: Context,
-    mediaSourceFactory: MediaSource.Factory,
+    factory: LoopPlayerFactory,
     private val spec: LoopSpec,
     seamless: Boolean,
     startPositionMs: Long = 0,
 ) {
-    data class LoopSpec(
-        val mediaItem: MediaItem,
-        val loopMs: Long,
-        val fadeMs: Long,
-    )
-
-    private val players = ArrayList<ExoPlayer>(2)
+    private val players = ArrayList<LoopPlayer>(2)
     private var front = 0
     private var fading = false
     private var mix = 0f
     private var playing = false
     private var ticking = false
     private var released = false
-    private var videoSize: VideoSize = VideoSize.UNKNOWN
+    private var videoSize: Triple<Int, Int, Float>? = null
     private var target: VideoTarget? = null
 
     private val fadeEnabled get() = players.size == 2
@@ -56,10 +38,10 @@ class LoopSession(
     var speed: Float = 1f
         set(value) {
             field = value
-            players.forEach { it.setPlaybackSpeed(value) }
+            players.forEach { it.speed = value }
         }
 
-    val positionMs: Long get() = players.getOrNull(front)?.currentPosition ?: 0
+    val positionMs: Long get() = players.getOrNull(front)?.positionMs ?: 0
 
     private val ticker = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -71,19 +53,13 @@ class LoopSession(
 
     init {
         val count = if (seamless && spec.fadeMs > 0) 2 else 1
-        repeat(count) { index ->
-            val player = ExoPlayer.Builder(context)
-                .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true))
-                .setMediaSourceFactory(mediaSourceFactory)
-                .build()
-            player.volume = 0f
-            player.repeatMode = if (count == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            player.setMediaItem(spec.mediaItem)
-            player.addListener(PlayerListener(index))
-            player.prepare()
-            if (index == 0 && startPositionMs > 0) player.seekTo(startPositionMs.coerceIn(0, spec.loopMs))
+        repeat(count) {
+            val player = factory.create(spec)
+            player.repeat = count == 1
+            player.listener = PlayerListener(player)
             players += player
         }
+        if (startPositionMs > 0) players[0].seekToStart(startPositionMs.coerceIn(0, spec.loopMs))
     }
 
     fun attach(newTarget: VideoTarget) {
@@ -92,9 +68,7 @@ class LoopSession(
         target = newTarget
         newTarget.onSurfacesChanged = { bindSurfaces() }
         bindSurfaces()
-        if (videoSize != VideoSize.UNKNOWN) {
-            newTarget.setVideoSize(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
-        }
+        videoSize?.let { (w, h, ratio) -> newTarget.setVideoSize(w, h, ratio) }
         newTarget.present(front, mix)
     }
 
@@ -102,7 +76,7 @@ class LoopSession(
         if (target !== oldTarget) return
         oldTarget.onSurfacesChanged = null
         target = null
-        players.forEach { it.clearVideoSurface() }
+        players.forEach { it.setSurface(null) }
     }
 
     fun play() {
@@ -131,10 +105,7 @@ class LoopSession(
 
     private fun bindSurfaces() {
         val surfaces = target?.surfaces
-        players.forEachIndexed { index, player ->
-            val surface = surfaces?.getOrNull(index)
-            if (surface != null) player.setVideoSurface(surface) else player.clearVideoSurface()
-        }
+        players.forEachIndexed { index, player -> player.setSurface(surfaces?.getOrNull(index)) }
     }
 
     private fun tick() {
@@ -142,20 +113,21 @@ class LoopSession(
         val current = players[front]
         val next = players[1 - front]
         if (!fading) {
-            val reachedLoop = current.currentPosition >= spec.loopMs || current.playbackState == Player.STATE_ENDED
+            val reachedLoop = current.positionMs >= spec.loopMs || current.isEnded
             if (!reachedLoop) return
-            if (next.playbackState == Player.STATE_READY) {
+            if (next.isReady) {
                 next.play()
                 fading = true
-            } else if (current.playbackState == Player.STATE_ENDED) {
-                current.seekTo(0) // the back player is not ready: hard loop this time
+            } else if (current.isEnded) {
+                current.seekToStart() // the back player is not ready: hard loop this time
+                if (playing) current.play()
             }
             return
         }
-        mix = (next.currentPosition.toFloat() / spec.fadeMs).coerceIn(0f, 1f)
-        if (mix >= 1f || next.playbackState == Player.STATE_ENDED) {
+        mix = (next.positionMs.toFloat() / spec.fadeMs).coerceIn(0f, 1f)
+        if (mix >= 1f || next.isEnded) {
             current.pause()
-            current.seekTo(0)
+            current.seekToStart()
             front = 1 - front
             fading = false
             mix = 0f
@@ -174,40 +146,36 @@ class LoopSession(
         Choreographer.getInstance().removeFrameCallback(ticker)
     }
 
-    /** Drops the second decoder and loops the remaining player gaplessly. */
-    private fun fallBackToSinglePlayer(failed: Int) {
+    /** Drops the second decoder and loops the remaining player on its own. */
+    private fun fallBackToSinglePlayer(failed: LoopPlayer) {
         if (!fadeEnabled) return
         stopTicking()
-        val survivor = players[1 - failed]
-        players[failed].release()
+        val survivor = players.first { it !== failed }
+        failed.release()
         players.clear()
         players += survivor
         front = 0
         fading = false
         mix = 0f
-        survivor.repeatMode = Player.REPEAT_MODE_ONE
+        survivor.repeat = true
         bindSurfaces()
         target?.present(0, 0f)
         if (playing) survivor.play()
     }
 
-    private inner class PlayerListener(private val index: Int) : Player.Listener {
-        override fun onVideoSizeChanged(size: VideoSize) {
-            if (size.width <= 0 || size.height <= 0) return
-            videoSize = size
-            target?.setVideoSize(size.width, size.height, size.pixelWidthHeightRatio)
+    private inner class PlayerListener(private val player: LoopPlayer) : LoopPlayer.Listener {
+        override fun onVideoSize(width: Int, height: Int, pixelRatio: Float) {
+            videoSize = Triple(width, height, pixelRatio)
+            target?.setVideoSize(width, height, pixelRatio)
         }
 
-        override fun onPlayerError(error: PlaybackException) {
+        override fun onError(error: Exception) {
             if (released) return
-            val position = players.indexOfFirst { it.playerError === error }.takeIf { it >= 0 } ?: index
             if (fadeEnabled) {
-                fallBackToSinglePlayer(position)
+                fallBackToSinglePlayer(player)
             } else {
-                players.firstOrNull()?.let {
-                    it.prepare()
-                    if (playing) it.play()
-                }
+                player.seekToStart()
+                if (playing) player.play()
             }
         }
     }

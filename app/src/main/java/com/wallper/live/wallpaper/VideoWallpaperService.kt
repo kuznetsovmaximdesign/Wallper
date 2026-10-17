@@ -12,12 +12,15 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.opengl.GLSurfaceView
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
 import com.wallper.live.WallperApplication
 import com.wallper.live.core.Foldables
+import com.wallper.live.core.PanelKind
 import com.wallper.live.core.WallpaperRole
 import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.playback.LoopRenderer
@@ -34,6 +37,13 @@ class VideoWallpaperService : WallpaperService() {
 
     override fun onCreateEngine(): Engine = VideoEngine()
 
+    private companion object {
+        const val HINGE_SILENCE_MS = 400L
+
+        /** Shared by the cover and inner engines: where the hinge was last seen. */
+        @Volatile var lastHingeAngle: Float? = null
+    }
+
     private inner class VideoEngine : Engine() {
 
         private val container = (application as WallperApplication).container
@@ -46,12 +56,21 @@ class VideoWallpaperService : WallpaperService() {
         @Volatile private var coverFile: File? = null
 
         private val foldable = Foldables.isFoldable(this@VideoWallpaperService)
+        private val handler = Handler(Looper.getMainLooper())
         private val sensors = getSystemService(SensorManager::class.java)
         private var hingeRegistered = false
 
+        private val hingeFallback = Runnable { if (!hingeHeard) renderer.setHingeAngle(180f) }
+        private var hingeHeard = false
+
         private val hingeListener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                renderer.setHingeAngle(event.values[0])
+                val angle = event.values[0]
+                hingeHeard = true
+                lastHingeAngle = angle
+                // Stops-only sensors (Samsung: 0/90/180°) get the softer spring.
+                if (angle % 90f == 0f) renderer.hingeCoarse = true
+                renderer.setHingeAngle(angle)
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -128,7 +147,8 @@ class VideoWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(visible: Boolean) {
             if (visible) {
-                renderer.reveal()
+                // On a foldable the hinge drives the glass; elsewhere play the wake reveal.
+                if (renderer.panel == PanelKind.Regular) renderer.reveal()
                 setHingeTracking(true)
                 glView?.onResume()
                 refreshRole()
@@ -151,8 +171,16 @@ class VideoWallpaperService : WallpaperService() {
             if (!foldable || enabled == hingeRegistered) return
             val sensor = sensors?.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) ?: return
             hingeRegistered = if (enabled) {
+                renderer.hingeCoarse = sensor.resolution >= 30f
+                // A panel that lights up mid-unfold starts from the last known angle
+                // (frosted), never from a sharp picture that then jumps.
+                if (renderer.panel == PanelKind.Inner) renderer.snapHinge(lastHingeAngle ?: 60f)
+                hingeHeard = false
+                handler.removeCallbacks(hingeFallback)
+                handler.postDelayed(hingeFallback, HINGE_SILENCE_MS)
                 sensors.registerListener(hingeListener, sensor, SensorManager.SENSOR_DELAY_GAME)
             } else {
+                handler.removeCallbacks(hingeFallback)
                 sensors.unregisterListener(hingeListener)
                 false
             }

@@ -3,6 +3,8 @@ package com.wallper.live.ui.components
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.view.Surface
 import android.view.TextureView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -17,12 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.compose.LifecycleResumeEffect
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
-import androidx.media3.exoplayer.ExoPlayer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wallper.live.WallperApplication
+import com.wallper.live.playback.LoopPlayer
+import com.wallper.live.playback.LoopSpec
 
 /** TextureView that center-crops its video, so it can live inside rounded, clipped cards. */
 @SuppressLint("ViewConstructor")
@@ -55,65 +57,69 @@ class CropTextureView(context: Context) : TextureView(context) {
     }
 }
 
-/** One muted preview player per screen; only the focused card renders into it. */
-@Composable
-fun rememberPreviewPlayer(): ExoPlayer {
-    val context = LocalContext.current
-    val player = remember(context) { (context.applicationContext as WallperApplication).container.newPreviewPlayer() }
-    DisposableEffect(player) { onDispose { player.release() } }
-    LifecycleResumeEffect(player) {
-        player.playWhenReady = true
-        onPauseOrDispose { player.playWhenReady = false }
-    }
-    return player
-}
-
 /**
- * Plays [uri] muted and looping inside a card. The view stays transparent until the
- * first frame is rendered, so the cover underneath never flashes black.
+ * Plays [spec] muted and looping inside a card (only the focused card mounts one).
+ * The view stays transparent until the first frame, so the cover never flashes black.
  */
 @Composable
-fun InlineVideo(player: ExoPlayer, uri: String, modifier: Modifier = Modifier, startMs: Long = 0) {
+fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val factory = remember(context) { (context.applicationContext as WallperApplication).container.loopPlayers }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val view = remember(context) { CropTextureView(context) }
-    var rendered by remember(uri) { mutableStateOf(false) }
+    var rendered by remember(spec) { mutableStateOf(false) }
     val alpha by animateFloatAsState(if (rendered) 1f else 0f, tween(450), label = "inlineVideoAlpha")
 
-    DisposableEffect(player, uri) {
-        val listener = object : Player.Listener {
-            override fun onVideoSizeChanged(videoSize: VideoSize) {
-                if (videoSize.width > 0) {
-                    view.setVideoSize((videoSize.width * videoSize.pixelWidthHeightRatio).toInt(), videoSize.height)
-                }
+    DisposableEffect(spec, lifecycle) {
+        val player = factory.create(spec)
+        player.repeat = true
+        player.listener = object : LoopPlayer.Listener {
+            override fun onVideoSize(width: Int, height: Int, pixelRatio: Float) {
+                view.setVideoSize((width * pixelRatio).toInt(), height)
             }
 
-            override fun onRenderedFirstFrame() {
+            override fun onFirstFrame() {
                 rendered = true
             }
+
+            override fun onError(error: Exception) = Unit
         }
-        player.addListener(listener)
-        player.setVideoTextureView(view)
-        val item = MediaItem.Builder().setUri(uri).apply {
-            if (startMs > 0) {
-                setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(startMs)
-                        .setEndPositionMs(startMs + PREVIEW_LOOP_MS)
-                        .build(),
-                )
+        var surface: Surface? = null
+        fun attach(texture: SurfaceTexture) {
+            surface?.release()
+            surface = Surface(texture).also(player::setSurface)
+        }
+        view.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) = attach(texture)
+            override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
+            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+            override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+                player.setSurface(null)
+                surface?.release()
+                surface = null
+                return true
             }
-        }.build()
-        player.setMediaItem(item)
-        player.prepare()
-        player.play()
+        }
+        view.surfaceTexture?.let(::attach)
+
+        // Only decode while the screen is in front.
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> player.play()
+                Lifecycle.Event.ON_PAUSE -> player.pause()
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) player.play()
+
         onDispose {
-            player.removeListener(listener)
-            player.clearVideoTextureView(view)
-            player.stop()
+            lifecycle.removeObserver(observer)
+            view.surfaceTextureListener = null
+            player.release()
+            surface?.release()
         }
     }
 
     AndroidView(factory = { view }, modifier = modifier.fillMaxSize().alpha(alpha))
 }
-
-private const val PREVIEW_LOOP_MS = 20_000L
