@@ -1,0 +1,22 @@
+name: Probe versions
+on:
+  push:
+    paths:
+      - .github/workflows/probe-versions.yml
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Library versions
+        run: |
+          for a in androidx/compose/compose-bom androidx/compose/material3/material3 androidx/compose/foundation/foundation \
+                   androidx/media3/media3-exoplayer androidx/activity/activity-compose androidx/core/core-ktx \
+                   androidx/lifecycle/lifecycle-runtime-compose androidx/test/ext/junit androidx/test/runner \
+                   androidx/test/rules androidx/test/uiautomator/uiautomator androidx/test/espresso/espresso-intents \
+                   androidx/compose/ui/ui-test-junit4 com/android/tools/build/gradle androidx/work/work-runtime-ktx \
+                   androidx/datastore/datastore-preferences androidx/window/window; do
+            echo "== $a: $(curl -s https://dl.google.com/android/maven2/$a/maven-metadata.xml | grep -o '<version>[^<]*</version>' | sed 's/<[^>]*>//g' | tail -12 | tr '\n' ' ')"
+          done
+          echo "== ffmpeg: $(which ffmpeg || echo missing)"
+          echo "== kvm: $(ls -l /dev/kvm 2>&1)"
+          ls $ANDROID_HOME/platforms $ANDROID_HOME/build-tools $ANDROID_HOME/system-images 2>&1 | head -40
