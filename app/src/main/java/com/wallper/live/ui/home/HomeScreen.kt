@@ -419,7 +419,9 @@ private fun MediaCard(
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .testTag(tag),
     ) {
-        Box(Modifier.fillMaxSize().shimmer())
+        // Placeholder only until there is a picture: an endless sweep under a playing
+        // card would keep every card redrawing for nothing.
+        if (cover == null) Box(Modifier.fillMaxSize().shimmer()) else Box(Modifier.fillMaxSize().background(CardPlaceholder))
         if (cover != null) {
             // A remote URL is Apple's small still: soften it instead of showing pixels.
             val lowRes = cover is String
@@ -525,6 +527,7 @@ private fun ProgressBadge(progress: Float) {
 }
 
 private const val CARD_RATIO = 9f / 16f
+private val CardPlaceholder = Color(0xFF15151B)
 private const val MAX_LIVE_CARDS = 6
 private val LOW_RES_BLUR = 14.dp
 private const val HERO_RATIO = 4f / 5f
