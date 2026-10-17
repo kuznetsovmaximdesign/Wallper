@@ -14,7 +14,8 @@ permissions:
 
 concurrency:
   group: android-${{ github.ref }}
-  cancel-in-progress: true
+  # Emulator runs take a while: queue new pushes instead of cancelling them.
+  cancel-in-progress: false
 
 jobs:
   build:
