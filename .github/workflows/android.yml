@@ -2,6 +2,10 @@ name: Android
 
 on:
   push:
+    paths-ignore:
+      - scripts/**
+      - .github/workflows/probe-*.yml
+      - README.md
   pull_request:
   workflow_dispatch:
 
