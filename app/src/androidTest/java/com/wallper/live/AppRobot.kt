@@ -46,7 +46,7 @@ class AppRobot {
 
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
         val found = device.wait(Until.findObject(By.res(tag)), timeoutMs)
-        assertNotNull("No element '$tag' on screen", found)
+        assertNotNull("No element '$tag' on screen (in front: ${device.currentPackageName})", found)
         return found!!
     }
 

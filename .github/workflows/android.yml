@@ -137,7 +137,11 @@ jobs:
           if [ -z "${booted:-}" ]; then echo "===== EMULATOR LOG ====="; tail -60 emulator.log; exit 1; fi
           $adb shell settings put global window_animation_scale 1
           $adb logcat -G 16M || true
+          $adb shell svc power stayon true
+          $adb shell input keyevent KEYCODE_WAKEUP
+          $adb shell wm dismiss-keyguard
           $adb shell input keyevent 82
+          $adb shell settings put secure lockscreen.disabled 1 || true
           if [ -n "${{ matrix.screen }}" ]; then $adb shell wm size ${{ matrix.screen }}; $adb shell wm density 360; fi
           echo "Emulator ready"
 
@@ -151,7 +155,12 @@ jobs:
 
       - name: Test timings
         if: always()
-        run: timeout 20 $ANDROID_HOME/platform-tools/adb logcat -d | grep -E "WallperScreen|WallperTest" | tail -60 || true
+        run: |
+          adb=$ANDROID_HOME/platform-tools/adb
+          echo "===== CRASHES ====="
+          timeout 20 $adb logcat -d -b crash | tail -60 || true
+          echo "===== APP ====="
+          timeout 20 $adb logcat -d | grep -E "WallperScreen|WallperTest|AndroidRuntime|com.wallper" | grep -v THREAD_STATE | tail -80 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
