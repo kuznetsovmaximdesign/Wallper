@@ -7,26 +7,18 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Versions
+      - name: Material3 expressive API signatures
         run: |
           G=https://dl.google.com/android/maven2
-          M=https://repo1.maven.org/maven2
-          v() { curl -s $1/maven-metadata.xml | grep -o '<version>[^<]*</version>' | sed 's/<[^>]*>//g' | grep -v -- '-' | tr '\n' ' '; }
-          echo "AGP: $(v $G/com/android/tools/build/gradle | tr ' ' '\n' | grep '^8\.1[2-3]\|^9\.' | tr '\n' ' ')"
-          echo "kotlin: $(v $M/org/jetbrains/kotlin/kotlin-gradle-plugin | tr ' ' '\n' | grep '^2\.[2-4]' | tr '\n' ' ')"
-          echo "serialization: $(v $M/org/jetbrains/kotlinx/kotlinx-serialization-json | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
-          echo "coroutines: $(v $M/org/jetbrains/kotlinx/kotlinx-coroutines-android | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
-          echo "coil: $(v $M/io/coil-kt/coil3/coil-compose | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
-          echo "okhttp: $(v $M/com/squareup/okhttp3/okhttp | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
-          echo "material3 stable: $(v $G/androidx/compose/material3/material3 | tr ' ' '\n' | tail -4 | tr '\n' ' ')"
-          echo "icons: $(v $G/androidx/compose/material/material-icons-core | tr ' ' '\n' | tail -3 | tr '\n' ' ')"
-          echo "--- BOM 2026.09.00"
-          curl -s $G/androidx/compose/compose-bom/2026.09.00/compose-bom-2026.09.00.pom | grep -A1 '<artifactId>\(material3\|foundation\|ui\|ui-test-junit4\|material-icons-core\)</artifactId>' | grep -o '<[a-zA-Z]*>[^<]*<' | tr '\n' ' '
-          echo
-          for p in androidx/compose/material3/material3/1.5.0-beta01/material3-1.5.0-beta01 androidx/compose/foundation/foundation/1.12.1/foundation-1.12.1; do
-            echo "--- $p.module deps:"
-            curl -s $G/$p.module | grep -o '"group": "[^"]*",[^}]*"module": "[^"]*"[^}]*"requires": "[^"]*"' | sed 's/[ \n]*"version": {//' | sort -u | head -40
-            curl -s -o /tmp/a.aar $G/$p.aar && unzip -p /tmp/a.aar META-INF/com/android/build/gradle/aar-metadata.properties
-          done
-          echo "--- gradle:"
-          curl -s https://services.gradle.org/versions/all | grep -o '"version" : "[89]\.[0-9.]*"' | head -12 | tr '\n' ' '
+          mkdir -p m3 && cd m3
+          curl -sfL -o m3.jar $G/androidx/compose/material3/material3-android/1.5.0-beta01/material3-android-1.5.0-beta01-sources.jar || echo "no sources jar"
+          unzip -q -o m3.jar || true
+          sig() { grep -rhn -A "$2" --include=*.kt -E "$1" . | grep -v '^\S*-\s*\*' | head -${3:-60}; echo "-----"; }
+          sig '^(@[A-Za-z]+ )*fun (HorizontalFloatingToolbar|SplitButtonLayout|ToggleButton|TonalToggleButton|LoadingIndicator|ContainedLoadingIndicator|MaterialExpressiveTheme|CircularWavyProgressIndicator|FilledTonalIconButton)\(' 22 400
+          sig 'fun (LeadingButton|TrailingButton|VibrantFloatingActionButton|StandardFloatingActionButton|standardFloatingToolbarColors|vibrantFloatingToolbarColors|leadingButtonShapesFor|trailingButtonShapesFor|shapesFor|shapes|toggleButtonColors|tonalToggleButtonColors)\(' 14 400
+          sig 'fun (expressive|standard)\(\)' 1 10
+          grep -rn "ExperimentalMaterial3ExpressiveApi" --include=*.kt . | grep "annotation class" | head
+          grep -rln "fun Slider(" . | head -3
+          sig '^fun Slider\(' 16 80
+          sig 'fun Track\(' 14 60
+          sig 'fun Thumb\(' 10 30
