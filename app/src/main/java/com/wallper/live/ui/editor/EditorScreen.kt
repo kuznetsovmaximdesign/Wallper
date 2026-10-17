@@ -25,11 +25,14 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +46,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -72,6 +77,7 @@ import com.wallper.live.ui.MainUiState
 import com.wallper.live.ui.components.GlassSurface
 import com.wallper.live.ui.components.LoopVideo
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** Callbacks of the viewer, grouped to keep call sites readable. */
 data class EditorActions(
@@ -115,6 +121,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
         edit.spec(Uri.parse(footage.masterUrl), highFrameRate = true)
     }
     var framing by remember { mutableStateOf(false) }
+    val pager = rememberViewerPager(items, footage.id, { it.id }) { actions.onOpen(EditorTarget.FromFootage(it)) }
 
     ViewerFrame(
         modifier = modifier,
@@ -122,8 +129,10 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
         subtitle = footage.collection?.takeIf { it != footage.title } ?: stringResource(R.string.label_4k),
         onBack = actions.onBack,
         framing = framing,
+        pagerState = pager,
+        pageCount = items.size,
         pager = {
-            ViewerPager(items, footage.id, { it.id }, { actions.onOpen(EditorTarget.FromFootage(it)) }, !framing) { item, active ->
+            ViewerPager(pager, items, footage.id, { it.id }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) spec else null,
                     still = covers.cached(item) ?: item.coverUrl,
@@ -141,6 +150,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
                 onSpeed = { edit.speed = it },
                 onSpeedDone = {},
                 fragment = edit.fragment(),
+                hasFragment = true,
                 framing = framing,
                 onFraming = { framing = !framing },
                 install = InstallModel(
@@ -175,6 +185,7 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
     }
 
     val roles = state.rolesOf(clip)
+    val pager = rememberViewerPager(state.clips, clip.id, { it.id }) { actions.onOpen(EditorTarget.FromClip(it.id)) }
     ViewerFrame(
         modifier = modifier,
         title = clip.title,
@@ -182,8 +193,10 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
         onBack = actions.onBack,
         framing = framing,
         onDelete = { actions.onDelete(clip) },
+        pagerState = pager,
+        pageCount = state.clips.size,
         pager = {
-            ViewerPager(state.clips, clip.id, { it.id }, { actions.onOpen(EditorTarget.FromClip(it.id)) }, !framing) { item, active ->
+            ViewerPager(pager, state.clips, clip.id, { it.id }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) {
                         LoopSpec(
@@ -209,6 +222,7 @@ private fun ClipViewer(clipId: String, state: MainUiState, actions: EditorAction
                 onSpeed = { speed = it },
                 onSpeedDone = { actions.onSaveSpeed(clip.id, speed) },
                 fragment = null,
+                hasFragment = false,
                 framing = framing,
                 onFraming = { framing = !framing },
                 install = InstallModel(
@@ -253,6 +267,7 @@ private fun DeviceViewer(uri: Uri, state: MainUiState, actions: EditorActions, m
                 onSpeed = { edit.speed = it },
                 onSpeedDone = {},
                 fragment = edit.fragment(),
+                hasFragment = true,
                 framing = framing,
                 onFraming = { framing = !framing },
                 install = InstallModel(lockChoice = WallpaperRoles.separateLockSupported),
@@ -326,21 +341,33 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
 }
 
 @Composable
-private fun <T> ViewerPager(
+private fun <T> rememberViewerPager(
     items: List<T>,
     currentId: String,
     id: (T) -> String,
     onSettled: (T) -> Unit,
+): PagerState {
+    val initial = items.indexOfFirst { id(it) == currentId }.coerceAtLeast(0)
+    val pagerState = rememberPagerState(initialPage = initial) { items.size }
+    val latestId by rememberUpdatedState(currentId)
+    val settle by rememberUpdatedState(onSettled)
+    LaunchedEffect(pagerState, items) {
+        snapshotFlow { pagerState.settledPage }.collect { index ->
+            items.getOrNull(index)?.let { if (id(it) != latestId) settle(it) }
+        }
+    }
+    return pagerState
+}
+
+@Composable
+private fun <T> ViewerPager(
+    pagerState: PagerState,
+    items: List<T>,
+    currentId: String,
+    id: (T) -> String,
     swipeEnabled: Boolean,
     page: @Composable (item: T, active: Boolean) -> Unit,
 ) {
-    val initial = items.indexOfFirst { id(it) == currentId }.coerceAtLeast(0)
-    val pagerState = rememberPagerState(initialPage = initial) { items.size }
-    LaunchedEffect(pagerState, items) {
-        snapshotFlow { pagerState.settledPage }.collect { index ->
-            items.getOrNull(index)?.let { if (id(it) != currentId) onSettled(it) }
-        }
-    }
     HorizontalPager(
         state = pagerState,
         key = { id(items[it]) },
@@ -370,8 +397,7 @@ private fun VideoPage(
                 seamless = state.settings.seamlessLoop,
                 speed = speed,
                 focus = focus,
-                frostReveal = state.settings.frostReveal,
-                revealKey = spec.uri,
+                frostReveal = false,
                 onFocusChange = onFocus,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -416,11 +442,36 @@ private fun ViewerFrame(
     onBack: (() -> Unit)?,
     framing: Boolean,
     onDelete: (() -> Unit)? = null,
+    pagerState: PagerState? = null,
+    pageCount: Int = 1,
     pager: @Composable () -> Unit,
     dock: @Composable () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     Box(modifier.fillMaxSize().background(Color.Black)) {
         pager()
+
+        // Visible paging affordances: arrows on the sides and a one-time swipe hint.
+        if (pagerState != null && pageCount > 1 && !framing) {
+            val page = pagerState.currentPage
+            if (page > 0) {
+                RoundGlassButton(
+                    onClick = { scope.launch { pagerState.animateScrollToPage(page - 1) } },
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.action_previous), tint = Color.White)
+                }
+            }
+            if (page < pageCount - 1) {
+                RoundGlassButton(
+                    onClick = { scope.launch { pagerState.animateScrollToPage(page + 1) } },
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.action_next), tint = Color.White)
+                }
+            }
+            SwipeHint(Modifier.align(Alignment.Center))
+        }
 
         // Scrims keep the chrome legible over bright skies.
         Box(
@@ -481,12 +532,10 @@ private fun ViewerFrame(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
-                if (subtitle != null) {
-                    Text(
-                        subtitle.uppercase(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.75f),
-                    )
+                val counter = pagerState?.takeIf { pageCount > 1 }?.let { "${it.currentPage + 1} / $pageCount" }
+                val caption = listOfNotNull(subtitle?.uppercase(), counter).joinToString("  ·  ")
+                if (caption.isNotEmpty()) {
+                    Text(caption, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.75f))
                 }
                 Text(title, style = MaterialTheme.typography.headlineMedium, color = Color.White)
             }
@@ -496,10 +545,33 @@ private fun ViewerFrame(
 }
 
 @Composable
-private fun RoundGlassButton(onClick: () -> Unit, content: @Composable () -> Unit) {
-    GlassSurface(CircleShape, Modifier.size(40.dp)) {
+private fun RoundGlassButton(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    GlassSurface(CircleShape, modifier.size(40.dp)) {
         IconButton(onClick = onClick, modifier = Modifier.fillMaxSize()) { content() }
     }
 }
+
+/** Shown once per app session, then fades away. */
+@Composable
+private fun SwipeHint(modifier: Modifier) {
+    var visible by remember { mutableStateOf(!swipeHintShown) }
+    LaunchedEffect(Unit) {
+        swipeHintShown = true
+        delay(2_500)
+        visible = false
+    }
+    AnimatedVisibility(visible, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
+        GlassSurface(RoundedCornerShape(50)) {
+            Text(
+                stringResource(R.string.hint_swipe),
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+private var swipeHintShown = false
 
 // endregion

@@ -15,7 +15,6 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 
 sealed interface ClipSource {
     data class Remote(val url: String) : ClipSource
@@ -38,7 +37,7 @@ data class ExportedClip(
  */
 class ClipExporter(
     private val context: Context,
-    private val http: OkHttpClient,
+    private val remote: RemoteFiles,
 ) {
 
     suspend fun export(
@@ -52,7 +51,7 @@ class ClipExporter(
         var muxer: MediaMuxer? = null
         try {
             when (source) {
-                is ClipSource.Remote -> extractor.setDataSource(HttpMediaDataSource(http, source.url))
+                is ClipSource.Remote -> extractor.setDataSource(remote.open(source.url))
                 is ClipSource.Local -> extractor.setDataSource(context, source.uri, null)
             }
             val track = (0 until extractor.trackCount).firstOrNull {

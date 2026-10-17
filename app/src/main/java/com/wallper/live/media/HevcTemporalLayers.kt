@@ -68,7 +68,7 @@ object HevcTemporalLayers {
     }
 
     /**
-     * For HEVC above the device's playable rate, scans ~2 s of samples from [startUs]
+     * For HEVC above the device's playable rate, scans ~0.5 s of samples from [startUs]
      * to learn the temporal-layer layout and returns the highest layer to keep;
      * [Int.MAX_VALUE] keeps everything. Leaves the extractor at an undefined position.
      */
@@ -99,7 +99,7 @@ object HevcTemporalLayers {
         return if (sourceFps > target + 1) maxLayerFor(counts, sourceFps, target) else Int.MAX_VALUE
     }
 
-    private const val SCAN_SAMPLES = 480
+    private const val SCAN_SAMPLES = 120 // 0.5 s at 240 fps: several full layer cycles
     private const val SCAN_BUFFER = 12 shl 20
 
     /** The highest frame rate (60 or 30) the device can decode at this resolution. */

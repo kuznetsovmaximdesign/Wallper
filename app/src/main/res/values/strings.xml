@@ -31,7 +31,11 @@
     <string name="install_lock">На экран блокировки</string>
     <string name="install_both">Рабочий стол и блокировка</string>
     <string name="dock_frame">Кадр</string>
-    <string name="hint_frame">Двигайте пальцем, чтобы выбрать кадр</string>
+    <string name="dock_frame_done">Готово</string>
+    <string name="action_previous">Предыдущие обои</string>
+    <string name="action_next">Следующие обои</string>
+    <string name="hint_swipe">Листайте, чтобы смотреть другие обои</string>
+    <string name="hint_frame">Двигайте видео пальцем — выберите, какая часть будет на экране</string>
     <string name="fold_other_screen">Подтвердите обои и для этого экрана</string>
     <string name="action_delete">Удалить</string>
     <string name="action_undo">Отменить</string>

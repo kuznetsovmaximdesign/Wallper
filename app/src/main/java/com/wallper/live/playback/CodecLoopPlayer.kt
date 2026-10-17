@@ -9,8 +9,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.view.Surface
 import com.wallper.live.media.HevcTemporalLayers
-import com.wallper.live.media.HttpMediaDataSource
-import okhttp3.OkHttpClient
+import com.wallper.live.media.RemoteFiles
 
 /**
  * A small MediaCodec player for high-frame-rate HEVC (Apple's 4K 240 fps Aerials).
@@ -24,7 +23,7 @@ import okhttp3.OkHttpClient
  */
 class CodecLoopPlayer(
     private val context: Context,
-    private val http: OkHttpClient,
+    private val remote: RemoteFiles,
     private val spec: LoopSpec,
 ) : LoopPlayer {
 
@@ -154,7 +153,7 @@ class CodecLoopPlayer(
         val ex = MediaExtractor()
         val uri = spec.uri
         if (uri.scheme == "http" || uri.scheme == "https") {
-            ex.setDataSource(HttpMediaDataSource(http, uri.toString()))
+            ex.setDataSource(remote.open(uri.toString()))
         } else {
             ex.setDataSource(context, uri, null)
         }

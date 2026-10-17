@@ -173,6 +173,7 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
             val expanded = maxWidth >= 600.dp
             val home: @Composable (Modifier) -> Unit = { modifier ->
                 HomeScreen(
+                    autoplay = !(expanded && state.editor != null),
                     state = state,
                     onTab = vm::selectTab,
                     onCategory = vm::selectCategory,

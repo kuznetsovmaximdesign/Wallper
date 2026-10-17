@@ -99,6 +99,8 @@ fun HomeScreen(
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     selectedId: String? = null,
+    /** Off while the side-by-side viewer is playing, so only one decoder runs. */
+    autoplay: Boolean = true,
 ) {
     val insets = WindowInsets.safeDrawing.asPaddingValues()
     val gridState = rememberLazyGridState()
@@ -109,7 +111,8 @@ fun HomeScreen(
             state.clips.mapTo(HashSet()) { it.id }
         }
     }
-    val playingId by remember(gridState, mediaIds) { derivedStateOf { centeredItem(gridState, mediaIds) } }
+    val centeredId by remember(gridState, mediaIds) { derivedStateOf { centeredItem(gridState, mediaIds) } }
+    val playingId = centeredId.takeIf { autoplay }
 
     // Start from the top whenever the content set changes.
     LaunchedEffect(state.tab, state.category) { gridState.scrollToItem(0) }

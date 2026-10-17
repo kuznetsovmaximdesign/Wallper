@@ -12,7 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
-import okhttp3.OkHttpClient
+import com.wallper.live.media.RemoteFiles
 
 /** What a [LoopSession] (or an inline preview) plays: a window of one video. */
 data class LoopSpec(
@@ -60,10 +60,10 @@ interface LoopPlayer {
 class LoopPlayerFactory(
     private val context: Context,
     private val mediaSourceFactory: MediaSource.Factory,
-    private val http: OkHttpClient,
+    private val remote: RemoteFiles,
 ) {
     fun create(spec: LoopSpec): LoopPlayer =
-        if (spec.highFrameRate) CodecLoopPlayer(context, http, spec) else ExoLoopPlayer(context, mediaSourceFactory, spec)
+        if (spec.highFrameRate) CodecLoopPlayer(context, remote, spec) else ExoLoopPlayer(context, mediaSourceFactory, spec)
 }
 
 /** [LoopPlayer] backed by ExoPlayer, for regular-frame-rate sources. */

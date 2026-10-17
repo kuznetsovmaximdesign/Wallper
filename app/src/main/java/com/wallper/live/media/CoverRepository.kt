@@ -11,7 +11,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 
 /**
  * Sharp covers for catalog footage, cut on the device from the video itself (one key
@@ -19,7 +18,7 @@ import okhttp3.OkHttpClient
  * Apple's published stills are small, so they only serve as instant placeholders.
  */
 class CoverRepository(
-    private val http: OkHttpClient,
+    private val remote: RemoteFiles,
     private val directory: File,
 ) {
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File?>>()
@@ -46,7 +45,7 @@ class CoverRepository(
     private suspend fun render(footage: Footage, url: String): File? = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(HttpMediaDataSource(http, url))
+            retriever.setDataSource(remote.open(url))
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
                 ?: 60_000L
             val frame = retriever.getScaledFrameAtTime(

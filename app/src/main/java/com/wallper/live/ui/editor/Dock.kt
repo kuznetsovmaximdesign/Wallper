@@ -92,6 +92,8 @@ fun Dock(
     onSpeed: (Float) -> Unit,
     onSpeedDone: () -> Unit,
     fragment: FragmentModel?,
+    /** Shows the fragment chip from the first frame (disabled until the length is known). */
+    hasFragment: Boolean,
     framing: Boolean,
     onFraming: () -> Unit,
     install: InstallModel,
@@ -124,12 +126,16 @@ fun Dock(
                 DockChip(formatSpeed(speed), panel == DockPanel.Speed) {
                     panel = if (panel == DockPanel.Speed) null else DockPanel.Speed
                 }
-                if (fragment != null) {
-                    DockChip(formatDuration(fragment.loopMs), panel == DockPanel.Fragment) {
+                if (hasFragment) {
+                    DockChip(
+                        label = formatDuration(fragment?.loopMs ?: Playback.MAX_LOOP_MS),
+                        selected = panel == DockPanel.Fragment,
+                        enabled = fragment != null,
+                    ) {
                         panel = if (panel == DockPanel.Fragment) null else DockPanel.Fragment
                     }
                 }
-                DockChip(stringResource(R.string.dock_frame), framing) {
+                DockChip(stringResource(if (framing) R.string.dock_frame_done else R.string.dock_frame), framing) {
                     panel = null
                     onFraming()
                 }
@@ -141,7 +147,7 @@ fun Dock(
 }
 
 @Composable
-private fun DockChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun DockChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val container by animateColorAsState(
         if (selected) Color.White.copy(alpha = 0.22f) else Color.Transparent,
         label = "dockChip",
@@ -153,11 +159,11 @@ private fun DockChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .height(40.dp)
             .clip(RoundedCornerShape(50))
             .background(container)
-            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .clickable(enabled = enabled, interactionSource = interaction, indication = null, onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = Color.White)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = if (enabled) 1f else 0.45f))
     }
 }
 

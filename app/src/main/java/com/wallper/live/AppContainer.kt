@@ -15,6 +15,7 @@ import com.wallper.live.data.settings.SettingsRepository
 import com.wallper.live.media.ClipExporter
 import com.wallper.live.media.CoverRepository
 import com.wallper.live.media.MediaProbe
+import com.wallper.live.media.RemoteFiles
 import com.wallper.live.net.HttpClients
 import com.wallper.live.playback.LoopPlayerFactory
 import com.wallper.live.playback.LoopSession
@@ -47,11 +48,13 @@ class AppContainer(private val app: Application) {
 
     val catalog by lazy { CatalogRepository(AppleAerials(http, json, app.cacheDir), appScope) }
 
-    val covers by lazy { CoverRepository(http, File(app.cacheDir, "covers")) }
+    val remoteFiles by lazy { RemoteFiles(http, File(app.cacheDir, "ranges")) }
 
-    val exporter by lazy { ClipExporter(app, http) }
+    val covers by lazy { CoverRepository(remoteFiles, File(app.cacheDir, "covers")) }
 
-    val probe by lazy { MediaProbe(app, http) }
+    val exporter by lazy { ClipExporter(app, remoteFiles) }
+
+    val probe by lazy { MediaProbe(app, remoteFiles) }
 
     val exports by lazy { ExportScheduler(WorkManager.getInstance(app)) }
 
@@ -59,7 +62,7 @@ class AppContainer(private val app: Application) {
         DefaultMediaSourceFactory(DefaultDataSource.Factory(app, OkHttpDataSource.Factory(http)))
     }
 
-    val loopPlayers by lazy { LoopPlayerFactory(app, mediaSourceFactory, http) }
+    val loopPlayers by lazy { LoopPlayerFactory(app, mediaSourceFactory, remoteFiles) }
 
     val playbackHub by lazy { PlaybackHub(app, loopPlayers, library, settings, mainScope) }
 
