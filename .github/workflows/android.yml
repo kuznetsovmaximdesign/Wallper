@@ -149,8 +149,10 @@ jobs:
       - name: UI tests on emulator
         run: |
           set -o pipefail
-          ./gradlew connectedDebugAndroidTest > test.log 2>&1 && ok=1 || ok=0
+          # A wedged emulator must not hold the job for an hour without a word.
+          timeout 40m ./gradlew connectedDebugAndroidTest > test.log 2>&1 && ok=1 || ok=0
           echo "===== UI TESTS ====="
+          [ "$ok" = 1 ] || tail -25 test.log
           python3 -I scripts/test-summary.py app/build/outputs/androidTest-results
           [ "$ok" = 1 ]
 
