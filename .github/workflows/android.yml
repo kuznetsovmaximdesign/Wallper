@@ -64,6 +64,76 @@ jobs:
             Видеообои Wallper, сборка из `${{ github.ref_name }}` (${{ github.sha }}).
             Установите APK на телефон: он обновит предыдущую сборку.
 
+  # The exact APK people install (R8-shrunk release), launched on an emulator:
+  # it must open, show the gallery and keep running. Fast, so it reports first.
+  release-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wallper-apk
+          path: apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start emulator
+        run: |
+          sdk="$ANDROID_HOME"
+          export ANDROID_AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "system-images;android-34;google_apis;x86_64" > /dev/null
+          echo no | "$sdk/cmdline-tools/latest/bin/avdmanager" create avd --force -n test \
+            -k "system-images;android-34;google_apis;x86_64" -d pixel_7
+          printf 'hw.cpu.ncore=4\nhw.ramSize=4096\nhw.gpu.enabled=yes\nhw.gpu.mode=swiftshader_indirect\n' >> "$ANDROID_AVD_HOME/test.avd/config.ini"
+          nohup "$sdk/emulator/emulator" -avd test -no-window -no-snapshot -noaudio -no-boot-anim \
+            -camera-back none -gpu swiftshader_indirect -accel on > emulator.log 2>&1 &
+          emulator_pid=$!
+          adb="$sdk/platform-tools/adb"
+          for i in $(seq 1 180); do
+            kill -0 "$emulator_pid" 2>/dev/null || break
+            if [ "$($adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then booted=1; break; fi
+            sleep 5
+          done
+          if [ -z "${booted:-}" ]; then echo "===== EMULATOR LOG ====="; tail -60 emulator.log; exit 1; fi
+          $adb logcat -G 16M || true
+          $adb shell svc power stayon true
+          $adb shell input keyevent KEYCODE_WAKEUP
+          $adb shell wm dismiss-keyguard
+          sleep 15
+
+      - name: Release APK opens and keeps running
+        run: |
+          adb="$ANDROID_HOME/platform-tools/adb"
+          apk=$(ls apk/*.apk | head -1)
+          $adb install -r "$apk"
+          pkg=com.wallper.live
+          $adb logcat -c || true
+          $adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 > /dev/null
+          sleep 30
+          pid=$($adb shell pidof $pkg | tr -d '\r')
+          echo "===== CRASHES ====="
+          $adb logcat -d -b crash | head -80
+          echo "===== APP LOG ====="
+          $adb logcat -d | grep -E "AndroidRuntime|FATAL|Wallper|$pkg" | grep -v "^\s*$" | tail -60
+          $adb exec-out screencap -p > screen.png || true
+          if [ -z "$pid" ]; then echo "::error::The release app is not running 30 s after launch"; exit 1; fi
+          if $adb logcat -d -b crash | grep -q "Process: $pkg"; then echo "::error::The release app crashed"; exit 1; fi
+          echo "Release app is running (pid $pid)"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-smoke-screen
+          path: screen.png
+          if-no-files-found: ignore
+
   # Every user-facing action, run on an emulator against generated test videos.
   # Screenshots decide: after each action the wallpaper must still be visible and moving.
   ui-tests:
