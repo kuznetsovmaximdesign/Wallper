@@ -13,6 +13,9 @@
     <string name="category_underwater">Под водой</string>
     <string name="category_space">Космос</string>
     <string name="category_cities">Города</string>
+    <string name="category_mac">Mac</string>
+    <string name="preview_hfr_hint">Живое видео появится после подготовки 4K</string>
+    <string name="badge_new">Новое</string>
 
     <string name="catalog_loading">Загружаем каталог Apple…</string>
     <string name="catalog_error">Не удалось загрузить каталог. Проверьте интернет.</string>

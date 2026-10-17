@@ -78,7 +78,6 @@ import com.wallper.live.ui.HomeTab
 import com.wallper.live.ui.MainUiState
 import com.wallper.live.ui.components.pressScale
 import com.wallper.live.ui.components.shimmer
-import java.io.File
 
 @Composable
 fun HomeScreen(
@@ -227,6 +226,7 @@ private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?
         FootageCategory.Underwater to R.string.category_underwater,
         FootageCategory.Space to R.string.category_space,
         FootageCategory.Cities to R.string.category_cities,
+        FootageCategory.Mac to R.string.category_mac,
     )
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(options, key = { it.second }) { (category, label) ->
@@ -248,12 +248,12 @@ private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?
 private fun FootageCard(footage: Footage, progress: Float?, selected: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
     val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
-    var cover by remember(footage.id) { mutableStateOf(covers.cached(footage)) }
+    var cover by remember(footage.id) { mutableStateOf<Any?>(footage.coverUrl ?: covers.cached(footage)) }
     LaunchedEffect(footage.id) { if (cover == null) cover = covers.cover(footage) }
     MediaCard(
         cover = cover,
         title = footage.title,
-        caption = null,
+        caption = footage.collection?.takeIf { it != footage.title },
         selected = selected,
         onClick = onClick,
         badge = { if (progress != null) ProgressBadge(progress) },
@@ -284,7 +284,7 @@ private fun ClipCard(clip: Clip, roles: Set<WallpaperRole>, selected: Boolean, o
 
 @Composable
 private fun MediaCard(
-    cover: File?,
+    cover: Any?,
     title: String,
     caption: String?,
     selected: Boolean,

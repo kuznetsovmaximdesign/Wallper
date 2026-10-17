@@ -9,23 +9,36 @@ object TarReader {
     private const val BLOCK = 512
 
     /** Returns the content of the first regular file whose name matches [name]. */
-    fun extract(input: InputStream, name: String): ByteArray? {
+    fun extract(input: InputStream, name: String): ByteArray? =
+        extractAll(input) { it == name }[name]
+
+    /**
+     * Reads the archive once and returns every regular file accepted by [wanted],
+     * keyed by its normalised path (without a leading "./"). AppleDouble ("._*")
+     * metadata entries are skipped.
+     */
+    fun extractAll(input: InputStream, wanted: (String) -> Boolean): Map<String, ByteArray> {
+        val found = LinkedHashMap<String, ByteArray>()
         val header = ByteArray(BLOCK)
         while (true) {
-            if (!readFully(input, header)) return null
-            if (header.all { it == 0.toByte() }) return null
+            if (!readFully(input, header)) return found
+            if (header.all { it == 0.toByte() }) return found
             val entryName = cString(header, 0, 100)
             val prefix = cString(header, 345, 155)
             val fullName = if (prefix.isEmpty()) entryName else "$prefix/$entryName"
             val size = parseOctal(header, 124, 12)
             val type = header[156].toInt().toChar()
             val padded = (size + BLOCK - 1) / BLOCK * BLOCK
-            if ((type == '0' || type == '\u0000') && fullName.removePrefix("./") == name) {
+            val path = fullName.removePrefix("./")
+            val isMetadata = path.substringAfterLast('/').startsWith("._")
+            if ((type == '0' || type == '\u0000') && !isMetadata && wanted(path)) {
                 val data = ByteArray(size.toInt())
-                if (!readFully(input, data)) throw EOFException("Truncated tar entry $name")
-                return data
+                if (!readFully(input, data)) throw EOFException("Truncated tar entry $path")
+                found[path] = data
+                skipFully(input, padded - size)
+            } else {
+                skipFully(input, padded)
             }
-            skipFully(input, padded)
         }
     }
 

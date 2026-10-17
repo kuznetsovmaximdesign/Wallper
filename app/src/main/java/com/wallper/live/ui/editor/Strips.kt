@@ -30,7 +30,6 @@ import com.wallper.live.core.Clip
 import com.wallper.live.core.Footage
 import com.wallper.live.ui.components.Haptics
 import com.wallper.live.ui.components.shimmer
-import java.io.File
 
 /**
  * Film strip of neighbouring wallpapers: one tap swaps the live preview, so browsing
@@ -41,7 +40,7 @@ fun FootageStrip(items: List<Footage>, selectedId: String, onSelect: (Footage) -
     val context = LocalContext.current
     val covers = remember(context) { (context.applicationContext as WallperApplication).container.covers }
     Strip(items, selectedId, key = { it.id }, onSelect = onSelect) { footage ->
-        var cover by remember(footage.id) { mutableStateOf(covers.cached(footage)) }
+        var cover by remember(footage.id) { mutableStateOf<Any?>(footage.coverUrl ?: covers.cached(footage)) }
         LaunchedEffect(footage.id) { if (cover == null) cover = covers.cover(footage) }
         Thumb(cover)
     }
@@ -92,7 +91,7 @@ private fun <T> Strip(
 }
 
 @Composable
-private fun Thumb(cover: File?) {
+private fun Thumb(cover: Any?) {
     Box(Modifier.fillMaxSize().shimmer())
     if (cover != null) {
         AsyncImage(

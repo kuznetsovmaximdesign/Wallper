@@ -7,11 +7,17 @@ import androidx.compose.runtime.Immutable
 data class Footage(
     val id: String,
     val title: String,
+    /** Place/collection, e.g. "Тахо" or "Гималаи". */
+    val collection: String?,
     val category: FootageCategory,
     /** Best-quality master (4K HEVC) used to cut the wallpaper clip. */
     val masterUrl: String,
-    /** Lighter stream used for the live preview and covers. */
-    val previewUrl: String,
+    /** Light stream for a live preview; null when only the 4K master exists. */
+    val previewUrl: String?,
+    /** Still image published with the footage. */
+    val coverUrl: String?,
+    /** Master is above 60 fps (Apple's 240 fps macOS Aerials); reduced when cut. */
+    val highFrameRate: Boolean,
 )
 
 enum class FootageCategory {
@@ -19,4 +25,5 @@ enum class FootageCategory {
     Underwater,
     Space,
     Cities,
+    Mac,
 }

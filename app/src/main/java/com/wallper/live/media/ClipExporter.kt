@@ -32,7 +32,9 @@ data class ExportedClip(
  * Cuts a time range out of a video without re-encoding: samples are copied from the
  * source container into a new MP4, so the wallpaper keeps the original 4K bitstream.
  * The cut starts on the key frame at or before the requested start and ends on a GOP
- * boundary after the requested end. Audio is dropped.
+ * boundary after the requested end. Audio is dropped. High-frame-rate HEVC (Apple's
+ * 240 fps macOS Aerials) is reduced to what the device can decode (60 or 30 fps) by
+ * dropping upper temporal layers — still without re-encoding.
  */
 class ClipExporter(
     private val context: Context,
@@ -65,6 +67,10 @@ class ClipExporter(
             val startUs = startMs * 1000
             val endUs = (startMs + lengthMs) * 1000
 
+            val capacity = maxOf(format.intOrNull(MediaFormat.KEY_MAX_INPUT_SIZE) ?: 0, MIN_BUFFER)
+            val buffer = ByteBuffer.allocateDirect(capacity)
+            val maxLayer = chooseMaxLayer(extractor, format, buffer, startUs)
+
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             output.parentFile?.mkdirs()
             val mux = MediaMuxer(output.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).also { muxer = it }
@@ -72,8 +78,6 @@ class ClipExporter(
             val outTrack = mux.addTrack(format)
             mux.start()
 
-            val capacity = maxOf(format.intOrNull(MediaFormat.KEY_MAX_INPUT_SIZE) ?: 0, MIN_BUFFER)
-            val buffer = ByteBuffer.allocateDirect(capacity)
             val info = MediaCodec.BufferInfo()
             var firstUs = -1L
             var lastUs = 0L
@@ -88,7 +92,10 @@ class ClipExporter(
                 val isSync = extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0
                 if (firstUs < 0) firstUs = timeUs
                 if (timeUs > endUs && isSync) break
-                if (timeUs >= firstUs) {
+                buffer.position(0)
+                val dropped = maxLayer != Int.MAX_VALUE &&
+                    (HevcTemporalLayers.temporalId(buffer, size) ?: 0) > maxLayer
+                if (!dropped && timeUs >= firstUs) {
                     info.set(0, size, timeUs - firstUs, if (isSync) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     mux.writeSampleData(outTrack, buffer, info)
                     if (previousUs >= 0 && timeUs > previousUs) frameUs = minOf(frameUs, timeUs - previousUs)
@@ -132,10 +139,37 @@ class ClipExporter(
         }
     }
 
+    /**
+     * For HEVC above the device's playable rate, scans ~2 s of samples to learn the
+     * temporal-layer layout and returns the highest layer to keep; otherwise keeps all.
+     */
+    private fun chooseMaxLayer(extractor: MediaExtractor, format: MediaFormat, buffer: ByteBuffer, startUs: Long): Int {
+        if (format.getString(MediaFormat.KEY_MIME) != MediaFormat.MIMETYPE_VIDEO_HEVC) return Int.MAX_VALUE
+        extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        val counts = HashMap<Int, Int>()
+        val times = ArrayList<Long>(SCAN_SAMPLES)
+        while (times.size < SCAN_SAMPLES) {
+            val size = extractor.readSampleData(buffer, 0)
+            if (size < 0) break
+            times += extractor.sampleTime
+            buffer.position(0)
+            val tid = HevcTemporalLayers.temporalId(buffer, size) ?: 0
+            counts[tid] = (counts[tid] ?: 0) + 1
+            extractor.advance()
+        }
+        if (times.size < 2 || counts.size < 2) return Int.MAX_VALUE
+        times.sort()
+        val spanUs = (times.last() - times.first()).coerceAtLeast(1)
+        val sourceFps = (times.size - 1) * 1_000_000.0 / spanUs
+        val target = HevcTemporalLayers.playableFps(format)
+        return if (sourceFps > target + 1) HevcTemporalLayers.maxLayerFor(counts, sourceFps, target) else Int.MAX_VALUE
+    }
+
     private fun MediaFormat.intOrNull(key: String): Int? = if (containsKey(key)) getInteger(key) else null
 
     private companion object {
         const val MIN_BUFFER = 12 shl 20 // 4K HEVC key frames can be several MB
         const val COVER_MAX_SIDE = 1280
+        const val SCAN_SAMPLES = 480
     }
 }

@@ -32,7 +32,7 @@ class CoverRepository(
         val existing = inFlight.putIfAbsent(footage.id, deferred)
         if (existing != null) return existing.await()
         val result = permits.withPermit {
-            listOf(footage.previewUrl, footage.masterUrl).distinct().firstNotNullOfOrNull { url ->
+            listOfNotNull(footage.previewUrl, footage.masterUrl).distinct().firstNotNullOfOrNull { url ->
                 runCatching { render(footage, url) }.getOrNull()
             }
         }

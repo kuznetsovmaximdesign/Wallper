@@ -9,7 +9,9 @@ import java.io.File
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppleAerialsTest {
@@ -17,54 +19,103 @@ class AppleAerialsTest {
     private val aerials = AppleAerials(OkHttpClient(), Json { ignoreUnknownKeys = true }, File("build/tmp"))
 
     // Shape of tvOS resources-16 entries.json (trimmed).
-    private val entries = """
+    private val tvEntries = """
         {
-          "version": 1,
-          "categories": [
-            {"id": "U", "localizedNameKey": "AerialCategoryUnderwater"},
-            {"id": "L", "localizedNameKey": "AerialCategoryLandscapes"}
-          ],
+          "categories": [{"id": "U", "localizedNameKey": "AerialCategoryUnderwater"},
+                         {"id": "S", "localizedNameKey": "AerialCategorySpace"}],
           "assets": [
-            {
-              "id": "A",
-              "accessibilityLabel": "Iceland",
-              "categories": ["L"],
-              "shotID": "I003_C008",
-              "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/I003_C008_SDR_4K_HEVC.mov",
-              "url-1080-H264": "https://sylvan.apple.com/Videos/I003_C008_2K_AVC.mov",
-              "pointsOfInterest": {"0": "I003_C008_0"}
-            },
-            {
-              "id": "B",
-              "accessibilityLabel": "Seals",
-              "categories": ["U"],
-              "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/SE_A016_C009_SDR_4K_HEVC.mov",
-              "url-1080-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/SE_A016_C009_SDR_2K_HEVC.mov"
-            },
-            {"id": "C", "accessibilityLabel": "No video"}
+            {"id": "TV-SEALS", "accessibilityLabel": "Seals", "categories": ["U"], "shotID": "SE_A016_C009",
+             "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/SE_A016_C009_SDR_20190717_SDR_4K_HEVC.mov",
+             "url-1080-H264": "https://sylvan.apple.com/Videos/SE_A016_C009_SDR_20190717_SDR_2K_AVC.mov"},
+            {"id": "TV-AFRICA", "accessibilityLabel": "Africa Night", "categories": ["S"], "shotID": "X1",
+             "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/comp_GMT312_AFRICA_NIGHT_v14_SDR_FINAL_20180706_SDR_4K_HEVC.mov",
+             "url-1080-H264": "https://sylvan.apple.com/Videos/comp_GMT312_AFRICA_NIGHT_2K_AVC.mov"},
+            {"id": "TV-ONLY", "accessibilityLabel": "Iceland", "categories": [], "shotID": "I003",
+             "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/I003_C008_SDR_4K_HEVC.mov"},
+            {"id": "NO-VIDEO", "accessibilityLabel": "Nothing"}
           ]
         }
     """.trimIndent()
 
+    // Shape of macOS 26 resources-26-x.tar entries.json (trimmed).
+    private val macEntries = """
+        {
+          "categories": [
+            {"id": "L", "localizedNameKey": "AerialCategoryLandscapes",
+             "subcategories": [{"id": "SUB-TAHOE", "localizedNameKey": "AerialSubcategoryTahoe"}]},
+            {"id": "U", "localizedNameKey": "AerialCategoryUnderwater"},
+            {"id": "S", "localizedNameKey": "AerialCategorySpace"},
+            {"id": "M", "localizedNameKey": "AerialCategoryMac"}
+          ],
+          "assets": [
+            {"id": "MAC-TAHOE", "accessibilityLabel": "Tahoe Day", "localizedNameKey": "TAHOE_DAY_NAME",
+             "categories": ["L"], "subcategories": ["SUB-TAHOE"], "shotID": "TH_DAY", "preferredOrder": 2,
+             "previewImage": "https://sylvan.apple.com/tahoe.jpg",
+             "url-4K-SDR-240FPS": "https://sylvan.apple.com/itunes-assets/tahoe_sdr_4k_240p_tsa.mov"},
+            {"id": "MAC-SEALS", "accessibilityLabel": "Seals", "localizedNameKey": "SEALS_NAME",
+             "categories": ["U"], "shotID": "SE_A016_C009", "preferredOrder": 1,
+             "url-4K-SDR-240FPS": "https://sylvan.apple.com/itunes-assets/SE_A016_C009_sdr_4k_240p_tsa.mov"},
+            {"id": "MAC-AFRICA", "accessibilityLabel": "Africa Night", "localizedNameKey": "AFRICA_NAME",
+             "categories": ["S"], "shotID": "GMT312",
+             "url-4K-SDR-240FPS": "https://sylvan.apple.com/itunes-assets/comp_GMT312_AFRICA_NIGHT_v14_SDR_FINAL_20180706_FRC240fps_sdr_4k_tsa.mov"},
+            {"id": "MAC-PURPLE", "accessibilityLabel": "Mac Purple", "localizedNameKey": "MAC_WP_PPL_NAME",
+             "categories": ["M"], "url-4K-SDR-240FPS": "https://sylvan.apple.com/itunes-assets/Silver_Comp_tsa.mov"}
+          ]
+        }
+    """.trimIndent()
+
+    private val ruStrings = "\"TAHOE_DAY_NAME\" = \"Тахо днём\";\n\"AerialSubcategoryTahoe\" = \"Тахо\";\n" +
+        "\"SEALS_NAME\" = \"Тюлени\";\n"
+
+    private fun macFeed() = aerials.parseFeed(
+        tarOf(
+            "./entries.json" to macEntries.encodeToByteArray(),
+            "./TVIdleScreenStrings.bundle/Contents/Resources/ru.lproj/._Localizable.nocache.strings" to ByteArray(8),
+            "./TVIdleScreenStrings.bundle/Contents/Resources/ru.lproj/Localizable.nocache.strings" to
+                ruStrings.toByteArray(Charsets.UTF_16),
+        ),
+    )
+
+    private fun tvFeed() = aerials.parseFeed(tarOf("entries.json" to tvEntries.encodeToByteArray()))
+
     @Test
-    fun parsesAssetsWithRussianTitlesAndCategories() {
-        val items = aerials.parse(entries.encodeToByteArray())
-        assertEquals(listOf("A", "B"), items.map { it.id })
-        val iceland = items.first { it.id == "A" }
-        assertEquals("Исландия", iceland.title)
-        assertEquals(FootageCategory.Landscapes, iceland.category)
-        assertEquals("https://sylvan.apple.com/Videos/I003_C008_2K_AVC.mov", iceland.previewUrl)
-        val seals = items.first { it.id == "B" }
-        assertEquals("Морские котики", seals.title)
-        assertEquals(FootageCategory.Underwater, seals.category)
-        assertEquals(seals.previewUrl, "https://sylvan.apple.com/Aerials/2x/Videos/SE_A016_C009_SDR_2K_HEVC.mov")
+    fun macScenesUseAppleRussianNamesAndCollections() {
+        val items = aerials.merge(macFeed(), tvFeed())
+        val tahoe = items.first { it.id == "MAC-TAHOE" }
+        assertEquals("Тахо днём", tahoe.title)
+        assertEquals("Тахо", tahoe.collection)
+        assertEquals("https://sylvan.apple.com/tahoe.jpg", tahoe.coverUrl)
+        assertTrue(tahoe.highFrameRate)
+        assertNull(tahoe.previewUrl)
+        assertEquals(FootageCategory.Mac, items.first { it.id == "MAC-PURPLE" }.category)
+    }
+
+    @Test
+    fun scenesInBothFeedsUseTheTvosFilesForPreviewAndMaster() {
+        val items = aerials.merge(macFeed(), tvFeed())
+        val seals = items.first { it.id == "MAC-SEALS" } // matched by shot id
+        assertEquals("Тюлени", seals.title)
+        assertFalse(seals.highFrameRate)
+        assertTrue(seals.masterUrl.endsWith("SE_A016_C009_SDR_20190717_SDR_4K_HEVC.mov"))
+        assertTrue(seals.previewUrl!!.endsWith("_2K_AVC.mov"))
+        val africa = items.first { it.id == "MAC-AFRICA" } // matched by file stem
+        assertFalse(africa.highFrameRate)
+        // Twins are not listed twice; tvOS-only scenes are kept.
+        assertFalse(items.any { it.id == "TV-SEALS" || it.id == "TV-AFRICA" })
+        assertEquals("Исландия", items.first { it.id == "TV-ONLY" }.title)
+        assertFalse(items.any { it.id == "NO-VIDEO" })
+    }
+
+    @Test
+    fun worksWithASingleFeed() {
+        assertEquals(3, aerials.merge(null, tvFeed()).size)
+        assertEquals(4, aerials.merge(macFeed(), null).size)
     }
 
     @Test
     fun extractsFileFromTar() {
-        val tar = tarOf("TVIdleScreenStrings.bundle/Info.plist" to "plist".encodeToByteArray(), "entries.json" to entries.encodeToByteArray())
-        val extracted = TarReader.extract(ByteArrayInputStream(tar), "entries.json")
-        assertEquals(entries, extracted?.decodeToString())
+        val tar = tarOf("TVIdleScreenStrings.bundle/Info.plist" to "plist".encodeToByteArray(), "entries.json" to tvEntries.encodeToByteArray())
+        assertEquals(tvEntries, TarReader.extract(ByteArrayInputStream(tar), "entries.json")?.decodeToString())
         assertNull(TarReader.extract(ByteArrayInputStream(tar), "missing.json"))
     }
 

@@ -2,6 +2,12 @@ package com.wallper.live.ui.editor
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -55,13 +61,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
+import coil3.compose.AsyncImage
 import com.wallper.live.R
 import com.wallper.live.WallperApplication
 import com.wallper.live.core.Clip
@@ -98,7 +108,9 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
         is EditorTarget.FromFootage -> SourceEditor(
             key = target.footage.id,
             title = target.footage.title,
-            previewSource = ClipSource.Remote(target.footage.previewUrl),
+            previewSource = target.footage.previewUrl?.let { ClipSource.Remote(it) },
+            probeSource = ClipSource.Remote(target.footage.previewUrl ?: target.footage.masterUrl),
+            still = target.footage.coverUrl,
             state = state,
             progress = state.runningExport(target.footage.id)?.progress,
             primaryLabel = stringResource(R.string.action_create),
@@ -119,6 +131,8 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
             key = target.uri.toString(),
             title = null,
             previewSource = ClipSource.Local(target.uri),
+            probeSource = ClipSource.Local(target.uri),
+            still = null,
             state = state,
             progress = null,
             primaryLabel = stringResource(R.string.action_create_local),
@@ -141,7 +155,9 @@ fun EditorScreen(target: EditorTarget, state: MainUiState, actions: EditorAction
 private fun SourceEditor(
     key: String,
     title: String?,
-    previewSource: ClipSource,
+    previewSource: ClipSource?,
+    probeSource: ClipSource,
+    still: String?,
     state: MainUiState,
     progress: Float?,
     primaryLabel: String,
@@ -154,7 +170,7 @@ private fun SourceEditor(
     val context = LocalContext.current
     val probe = remember(context) { (context.applicationContext as WallperApplication).container.probe }
     var duration by remember(key) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(key) { duration = probe.durationMs(previewSource) }
+    LaunchedEffect(key) { duration = probe.durationMs(probeSource) }
 
     var startMs by rememberSaveable(key) { mutableLongStateOf(-1L) }
     var loopMs by rememberSaveable(key) { mutableLongStateOf(Playback.MAX_LOOP_MS) }
@@ -186,6 +202,7 @@ private fun SourceEditor(
         committed = startMs to loopMs
     }
     val spec = remember(committed, previewSource) {
+        if (previewSource == null) return@remember null
         committed?.let { (start, loop) ->
             val uri = when (previewSource) {
                 is ClipSource.Remote -> Uri.parse(previewSource.url)
@@ -215,6 +232,7 @@ private fun SourceEditor(
         onFocus = { focus = it },
         onBack = actions.onBack,
         modifier = modifier,
+        still = if (previewSource == null) still else null,
     ) {
         strip?.invoke()
         PanelTitle(title ?: stringResource(R.string.tab_mine), subtitle = duration?.let { "4K · ${formatTimestamp(it)}" })
@@ -337,6 +355,7 @@ private fun EditorScaffold(
     onFocus: (Focus) -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier,
+    still: String? = null,
     panel: @Composable () -> Unit,
 ) {
     var chrome by rememberSaveable { mutableStateOf(ChromeMode.Lock) }
@@ -354,6 +373,7 @@ private fun EditorScaffold(
             onFocusChange = onFocus,
             modifier = Modifier.fillMaxSize(),
         )
+        if (still != null) StillPreview(still, focus)
         AnimatedContent(
             targetState = chrome,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -579,6 +599,46 @@ private fun PrimaryButton(
                 Text(label)
             }
             else -> Text(label)
+        }
+    }
+}
+
+/**
+ * 240 fps masters are too heavy to stream for a preview, so these scenes show Apple's
+ * still with a slow Ken Burns drift until the 4K clip is prepared.
+ */
+@Composable
+private fun StillPreview(url: String, focus: Focus) {
+    val transition = rememberInfiniteTransition(label = "kenBurns")
+    val scale by transition.animateFloat(
+        initialValue = 1.04f,
+        targetValue = 1.14f,
+        animationSpec = infiniteRepeatable(tween(14_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "kenBurnsScale",
+    )
+    Box(Modifier.fillMaxSize()) {
+        AsyncImage(
+            model = url,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alignment = BiasAlignment(focus.x * 2f - 1f, focus.y * 2f - 1f),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                },
+        )
+        GlassSurface(
+            RoundedCornerShape(50),
+            Modifier.align(Alignment.Center),
+        ) {
+            Text(
+                stringResource(R.string.preview_hfr_hint),
+                style = MaterialTheme.typography.labelLarge,
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            )
         }
     }
 }
