@@ -136,6 +136,7 @@ jobs:
           done
           if [ -z "${booted:-}" ]; then echo "===== EMULATOR LOG ====="; tail -60 emulator.log; exit 1; fi
           $adb shell settings put global window_animation_scale 1
+          $adb logcat -G 16M || true
           $adb shell input keyevent 82
           if [ -n "${{ matrix.screen }}" ]; then $adb shell wm size ${{ matrix.screen }}; $adb shell wm density 360; fi
           echo "Emulator ready"
@@ -143,16 +144,14 @@ jobs:
       - name: UI tests on emulator
         run: |
           set -o pipefail
-          ./gradlew connectedDebugAndroidTest 2>&1 | tee test.log || {
-            echo "===== TEST FAILURES ====="
-            grep -E "FAILED|AssertionError|Exception|tests completed|No moving|disappeared|froze|took" test.log | grep -v "^\s*at " | head -80
-            exit 1
-          }
-          grep -E "tests completed|Finished" test.log || true
+          ./gradlew connectedDebugAndroidTest > test.log 2>&1 && ok=1 || ok=0
+          echo "===== UI TESTS ====="
+          python3 -I scripts/test-summary.py app/build/outputs/androidTest-results
+          [ "$ok" = 1 ]
 
       - name: Test timings
         if: always()
-        run: timeout 20 $ANDROID_HOME/platform-tools/adb logcat -d -s WallperScreen:I WallperTest:I | tail -60 || true
+        run: timeout 20 $ANDROID_HOME/platform-tools/adb logcat -d | grep -E "WallperScreen|WallperTest" | tail -60 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
