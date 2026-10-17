@@ -2,9 +2,11 @@ package com.wallper.live
 
 import android.app.Application
 import androidx.annotation.OptIn
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.work.WorkManager
@@ -58,6 +60,15 @@ class AppContainer(private val app: Application) {
     }
 
     val playbackHub by lazy { PlaybackHub(app, mediaSourceFactory, library, settings, mainScope) }
+
+    /** A muted player for inline gallery previews (one shared instance per screen). */
+    fun newPreviewPlayer(): ExoPlayer = ExoPlayer.Builder(app)
+        .setMediaSourceFactory(mediaSourceFactory)
+        .build()
+        .apply {
+            volume = 0f
+            repeatMode = Player.REPEAT_MODE_ONE
+        }
 
     /** A standalone loop for in-app previews (not shared with the wallpaper). */
     fun newLoopSession(spec: LoopSession.LoopSpec, seamless: Boolean): LoopSession =

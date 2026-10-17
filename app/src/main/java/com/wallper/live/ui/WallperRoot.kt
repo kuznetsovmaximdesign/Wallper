@@ -47,6 +47,7 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -55,6 +56,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wallper.live.R
+import com.wallper.live.core.Foldables
+import com.wallper.live.core.PanelKind
 import com.wallper.live.ui.components.Haptics
 import com.wallper.live.ui.editor.EditorActions
 import com.wallper.live.ui.editor.EditorScreen
@@ -82,8 +85,21 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
         onPauseOrDispose { }
     }
 
+    // Galaxy Fold & co. keep a separate home wallpaper per display, and the system picker
+    // only sets the display it is opened on. After a successful set, the first switch to
+    // the other display opens the picker there too, so both screens end up with it.
+    val foldable = remember(context) { Foldables.isFoldable(context) }
+    val configuration = LocalConfiguration.current
+    val panel = Foldables.classify(configuration.screenWidthDp, configuration.screenHeightDp, foldable)
+    var pendingFold by remember { mutableStateOf<Pair<PanelKind, Long>?>(null) }
+    var foldFollowUp by remember { mutableStateOf(false) }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        vm.onPickerClosed()
+        val applied = vm.onPickerClosed()
+        when {
+            foldFollowUp -> foldFollowUp = false // the second display is done, nothing left to chase
+            applied && foldable -> pendingFold = panel to System.currentTimeMillis()
+        }
     }
     fun openPicker() {
         try {
@@ -99,6 +115,17 @@ fun WallperRoot(vm: MainViewModel = viewModel()) {
                 context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             vm.open(EditorTarget.FromDevice(uri))
+        }
+    }
+
+    LaunchedEffect(panel) {
+        val pending = pendingFold ?: return@LaunchedEffect
+        if (pending.first == panel) return@LaunchedEffect
+        pendingFold = null
+        if (System.currentTimeMillis() - pending.second < FOLD_FOLLOW_UP_MS) {
+            foldFollowUp = true
+            openPicker()
+            snackbar.showSnackbar(context.getString(R.string.fold_other_screen), duration = SnackbarDuration.Short)
         }
     }
 
@@ -240,3 +267,5 @@ private fun CornerMask(radius: androidx.compose.ui.unit.Dp, color: Color) {
         drawPath(path, color)
     }
 }
+
+private const val FOLD_FOLLOW_UP_MS = 15 * 60 * 1000L

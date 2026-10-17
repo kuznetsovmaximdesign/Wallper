@@ -139,9 +139,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         liveActive.value = LiveWallpaper.isActive(getApplication())
     }
 
-    fun onPickerClosed() {
+    /** Returns true when the system picker actually set our wallpaper. */
+    fun onPickerClosed(): Boolean {
         refreshLiveWallpaper()
         if (liveActive.value) send(UiEvent.Message(R.string.toast_applied))
+        return liveActive.value
     }
 
     fun createFromFootage(

@@ -7,7 +7,6 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,9 +61,6 @@ private val WallperShapes = Shapes(
     large = RoundedCornerShape(28.dp),
     extraLarge = RoundedCornerShape(36.dp),
 )
-
-/** Lock-screen clock, in the spirit of large system clocks. */
-val ClockStyle = TextStyle(fontSize = 92.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-3).sp)
 
 @Composable
 fun WallperTheme(content: @Composable () -> Unit) {
