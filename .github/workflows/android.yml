@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     steps:
       - uses: actions/checkout@v4
 
@@ -68,7 +68,7 @@ jobs:
   # it must open, show the gallery and keep running. Fast, so it reports first.
   release-smoke:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     timeout-minutes: 25
     steps:
       - uses: actions/download-artifact@v4
@@ -186,7 +186,7 @@ jobs:
   # Every user-facing action, run on an emulator against generated test videos.
   # Screenshots decide: after each action the wallpaper must still be visible and moving.
   ui-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     timeout-minutes: 75
     strategy:
       fail-fast: false
