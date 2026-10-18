@@ -149,6 +149,7 @@ class ViewerTest {
     /** Each wallpaper keeps its settings; one not yet touched starts at the speed picked last. */
     @Test
     fun settingsStayWithEachWallpaper() {
+        app.forgetViewerChoices()
         app.openFootage(SCENE_A)
         Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "first wallpaper")
         app.tap(TestTags.DOCK_SPEED)

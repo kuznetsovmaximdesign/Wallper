@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import com.wallper.live.TestCatalog.Companion.SCENE_A
 import com.wallper.live.TestCatalog.Companion.SCENE_B
 import com.wallper.live.ui.components.TestTags
@@ -56,11 +57,13 @@ class StatesTest {
         val title = app.title()
         val unfolded = app.isUnfolded()
         app.setUnfolded(!unfolded)
-        assertEquals("The viewer must survive ${if (unfolded) "folding" else "unfolding"}", title, app.title())
-        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "after the posture change")
+        // Judged by what is on screen: the same title and a moving picture where the
+        // viewer is (the whole screen folded, the right pane unfolded).
+        app.awaitText(title)
+        Screen.awaitMoving(::viewerRegion, START_TIMEOUT_MS, "after ${if (unfolded) "folding" else "unfolding"}")
         app.setUnfolded(unfolded)
-        assertEquals(title, app.title())
-        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "after changing back")
+        app.awaitText(title)
+        Screen.awaitMoving(::viewerRegion, START_TIMEOUT_MS, "after changing back")
     }
 
     @Test
@@ -139,27 +142,25 @@ class StatesTest {
         app.tap(TestTags.DOCK_SPEED)
         app.find(TestTags.SPEED_SLIDER)
         app.back()
-        assertFalse("Back must close the speed panel", app.exists(TestTags.SPEED_SLIDER, 1_500))
+        assertTrue("Back must close the speed panel", app.gone(TestTags.SPEED_SLIDER, 3_000))
         app.find(TestTags.VIEWER)
 
         app.tap(TestTags.DOCK_FRAME)
         val hint = app.string(R.string.hint_frame)
         assertTrue("Framing shows its hint", app.device.hasObject(By.text(hint)))
         app.back()
-        SystemClock.sleep(800)
-        assertFalse("Back must leave framing", app.device.hasObject(By.text(hint)))
+        assertTrue("Back must leave framing", app.device.wait(Until.gone(By.text(hint)), 3_000))
         app.find(TestTags.VIEWER)
         Screen.assertKeepsPlaying(app::videoArea, 1_500, "after leaving framing with back")
 
         app.back()
-        assertFalse("Back must then close the viewer", app.exists(TestTags.VIEWER, 2_000) && app.exists(TestTags.TITLE, 500))
+        assertTrue("Back must then close the viewer", app.gone(TestTags.TITLE, 3_000))
         app.find(TestTags.GRID)
 
         app.tap(TestTags.SETTINGS)
         app.awaitText(app.string(R.string.settings_title))
         app.back()
-        SystemClock.sleep(800)
-        assertFalse("Back must close the settings sheet", app.device.hasObject(By.text(app.string(R.string.settings_title))))
+        assertTrue("Back must close the settings sheet", app.device.wait(Until.gone(By.text(app.string(R.string.settings_title))), 3_000))
         app.find(TestTags.GRID)
     }
 
@@ -177,11 +178,21 @@ class StatesTest {
         app.find(TestTags.INSTALL_LOCK)
         problems += app.accessibilityProblems("install menu")
         app.back()
+        app.gone(TestTags.INSTALL_LOCK, 3_000)
         app.closeViewer()
+        app.gone(TestTags.TITLE, 3_000)
         app.tap(TestTags.SETTINGS)
         app.awaitText(app.string(R.string.settings_title))
         problems += app.accessibilityProblems("settings")
         assertTrue("Accessibility problems:\n" + problems.joinToString("\n"), problems.isEmpty())
+    }
+
+    /** Where the viewer's video is, from the layout alone: full screen, or the right pane side by side. */
+    private fun viewerRegion(): Rect {
+        val w = app.device.displayWidth
+        val h = app.device.displayHeight
+        val pane = if (app.isUnfolded()) Rect(w / 2 + w / 20, 0, w, h) else Rect(0, 0, w, h)
+        return Screen.middle(pane)
     }
 
     companion object {

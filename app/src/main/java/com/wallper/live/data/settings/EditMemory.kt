@@ -4,14 +4,17 @@ import android.content.SharedPreferences
 import com.wallper.live.core.Focus
 import com.wallper.live.core.Playback
 
-/** What a person chose for one source in the viewer. */
-data class EditChoice(val startMs: Long, val loopMs: Long, val speed: Float, val focus: Focus)
+/**
+ * What a person chose for one source in the viewer. [speed] is null until they pick a
+ * speed for this very source: until then it follows the speed picked last anywhere.
+ */
+data class EditChoice(val startMs: Long, val loopMs: Long, val speed: Float?, val focus: Focus)
 
 /**
  * Remembers viewer choices per wallpaper, across switching and restarts: coming back
- * to a wallpaper restores its fragment, speed and framing, and a wallpaper opened for
- * the first time starts at the speed chosen last (framing and fragment depend on the
- * video, so those start fresh).
+ * to a wallpaper restores its fragment and framing, and the speed picked for it. A
+ * wallpaper whose speed was never touched plays at the speed picked last, so browsing
+ * keeps the chosen speed (framing and fragment depend on the video, so those don't carry).
  */
 class EditMemory(private val store: Store) {
 
@@ -23,16 +26,21 @@ class EditMemory(private val store: Store) {
 
     fun choiceFor(key: String): EditChoice? = store.get(PREFIX + key)?.let(::decode)
 
-    /** Speed for a wallpaper that has no choices yet: the one picked last. */
+    /** Speed for a wallpaper whose own speed was never picked: the one picked last. */
     fun startingSpeed(): Float =
         store.get(LAST_SPEED)?.toFloatOrNull()?.let(Playback::clampSpeed) ?: Playback.DEFAULT_SPEED
 
     fun remember(key: String, choice: EditChoice) {
         store.put(PREFIX + key, encode(choice))
-        store.put(LAST_SPEED, choice.speed.toString())
     }
 
-    private fun encode(c: EditChoice) = listOf(c.startMs, c.loopMs, c.speed, c.focus.x, c.focus.y).joinToString(";")
+    /** The person just picked [speed] (merely viewing a wallpaper does not count). */
+    fun pickedSpeed(speed: Float) {
+        store.put(LAST_SPEED, Playback.clampSpeed(speed).toString())
+    }
+
+    private fun encode(c: EditChoice) =
+        listOf(c.startMs, c.loopMs, c.speed?.toString().orEmpty(), c.focus.x, c.focus.y).joinToString(";")
 
     private fun decode(text: String): EditChoice? {
         val parts = text.split(';')
@@ -40,7 +48,7 @@ class EditMemory(private val store: Store) {
         return EditChoice(
             startMs = parts[0].toLongOrNull() ?: return null,
             loopMs = parts[1].toLongOrNull() ?: return null,
-            speed = parts[2].toFloatOrNull()?.let(Playback::clampSpeed) ?: return null,
+            speed = if (parts[2].isEmpty()) null else parts[2].toFloatOrNull()?.let(Playback::clampSpeed) ?: return null,
             focus = Focus(
                 x = parts[3].toFloatOrNull()?.coerceIn(0f, 1f) ?: return null,
                 y = parts[4].toFloatOrNull()?.coerceIn(0f, 1f) ?: return null,

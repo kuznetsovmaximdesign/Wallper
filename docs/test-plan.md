@@ -62,7 +62,7 @@
 | V4 | Сдвинуть фрагмент | Видео не прерывается | UI `changingTheFragmentKeepsPlaying` |
 | V5 | Свайп и стрелки | Следующие и предыдущие обои, видео идёт | UI `swipeAndArrowsSwitchWallpapers` |
 | V6 | 60 fps HEVC, медленный декодер | Не замирает, кадр минимум каждые 120 мс | UI `highFrameRateFootagePlays` |
-| V7 | Настройки фона при переключении | Каждый фон хранит свои; новый наследует последнюю скорость; сохраняется после выхода | UI `settingsStayWithEachWallpaper`, Unit `EditMemoryTest` |
+| V7 | Настройки фона при переключении | Фрагмент и кадр у каждого фона свои. Скорость своя, если её меняли на этом фоне, иначе действует последняя выбранная. Всё сохраняется после выхода | UI `settingsStayWithEachWallpaper`, Unit `EditMemoryTest` |
 | V8 | Fold, две панели: выбрать другой фон слева | Правая панель переключается и играет | UI `choosingAnotherWallpaperInTheGallerySwitchesTheViewer` |
 | V9 | Меню «Установить» открыть и закрыть | Пункты «блокировка» и «оба» есть, видео идёт | UI `installMenuOffersLockScreenChoices` |
 | V10 | Установить → системный выбор → назад | Клип появился в «Моих», живая карточка, «Кадр» работает | UI `installingAddsTheClipAndKeepsPlaying` |

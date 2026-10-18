@@ -69,9 +69,9 @@ class AppRobot {
      */
     private fun dismissSystemDialog() {
         val dialog = device.findObject(By.res("android:id/aerr_wait")) ?: return
-        val message = device.findObject(By.res("android:id/alertTitle"))?.text.orEmpty()
+        val message = runCatching { device.findObject(By.res("android:id/alertTitle"))?.text }.getOrNull().orEmpty()
         if (message.contains("Wallper", ignoreCase = true)) error("The app is not responding: $message")
-        dialog.click()
+        runCatching { dialog.click() } // the dialog may close on its own meanwhile
     }
 
     /** The most visible of several elements with [tag] (pager pages next to the current one share it). */
@@ -159,6 +159,17 @@ class AppRobot {
         val own = node.text?.takeIf { it.isNotBlank() } ?: node.contentDescription?.takeIf { it.isNotBlank() }
         if (own != null || depth >= 3) return own.orEmpty()
         return node.children.asSequence().map { label(it, depth + 1) }.firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+
+    /** Waits until no element has [tag] (exit animations included). */
+    fun gone(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): Boolean {
+        reportViewIds()
+        return device.wait(Until.gone(By.res(tag)), timeoutMs)
+    }
+
+    /** Forgets what the viewer remembered per wallpaper, for tests that need a clean start. */
+    fun forgetViewerChoices() {
+        instrumentation.targetContext.getSharedPreferences("viewer-edits", 0).edit().clear().commit()
     }
 
     fun exists(tag: String, timeoutMs: Long = 1_000): Boolean {

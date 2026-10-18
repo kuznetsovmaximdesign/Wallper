@@ -178,13 +178,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
+        # Two devices x two suites, in parallel: each job stays well inside its time.
+        device:
           - name: phone
             screen: ""
           # The Fold's inner screen: wide enough for the side-by-side layout.
           - name: foldable
             screen: "1840x2208"
-    name: ui-tests (${{ matrix.name }})
+        suite:
+          - name: actions
+            classes: com.wallper.live.GalleryTest,com.wallper.live.ViewerTest
+          - name: states
+            classes: com.wallper.live.StatesTest
+    name: ui-tests (${{ matrix.device.name }}, ${{ matrix.suite.name }})
     steps:
       - uses: actions/checkout@v4
 
@@ -248,15 +254,20 @@ jobs:
           $adb shell wm dismiss-keyguard
           $adb shell input keyevent 82
           $adb shell settings put secure lockscreen.disabled 1 || true
-          sleep 20 # let the system settle after boot before testing
-          if [ -n "${{ matrix.screen }}" ]; then $adb shell wm size ${{ matrix.screen }}; $adb shell wm density 360; fi
+          # Let the post-boot storm pass (broadcasts, launcher, Play services) before testing:
+          # tests that start during it meet "isn't responding" dialogs of system apps.
+          timeout 180 $adb shell am wait-for-broadcast-idle > /dev/null 2>&1 || true
+          sleep 20
+          $adb shell input keyevent KEYCODE_HOME
+          if [ -n "${{ matrix.device.screen }}" ]; then $adb shell wm size ${{ matrix.device.screen }}; $adb shell wm density 360; fi
           echo "Emulator ready"
 
       - name: UI tests on emulator
         run: |
           set -o pipefail
           # A wedged emulator must not hold the job for an hour without a word.
-          timeout 40m ./gradlew connectedDebugAndroidTest > test.log 2>&1 && ok=1 || ok=0
+          timeout 40m ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.class=${{ matrix.suite.classes }} > test.log 2>&1 && ok=1 || ok=0
           echo "===== UI TESTS ====="
           [ "$ok" = 1 ] || tail -25 test.log
           python3 -I scripts/test-summary.py app/build/outputs/androidTest-results
@@ -284,6 +295,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ui-test-reports-${{ matrix.name }}
+          name: ui-test-reports-${{ matrix.device.name }}-${{ matrix.suite.name }}
           path: app/build/reports/androidTests
           if-no-files-found: ignore

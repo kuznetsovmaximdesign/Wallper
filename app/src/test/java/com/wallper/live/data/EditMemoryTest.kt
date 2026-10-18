@@ -35,10 +35,30 @@ class EditMemoryTest {
     }
 
     @Test
-    fun theLastSpeedCarriesOverToWallpapersNotYetTouched() {
+    fun theLastPickedSpeedCarriesOverToWallpapersNotYetTouched() {
+        memory.pickedSpeed(3.5f)
         memory.remember("a", EditChoice(0, 30_000, 3.5f, Focus.Center))
         assertEquals(3.5f, memory.startingSpeed(), 0f)
         assertNull(memory.choiceFor("never-opened"))
+    }
+
+    @Test
+    fun aWallpaperOpenedWithoutPickingASpeedFollowsTheLastOne() {
+        memory.remember("b", EditChoice(0, 30_000, null, Focus.Center)) // only looked at
+        memory.pickedSpeed(2.5f)
+        memory.remember("a", EditChoice(0, 30_000, 2.5f, Focus.Center))
+        assertNull(memory.choiceFor("b")!!.speed)
+        assertEquals(2.5f, memory.startingSpeed(), 0f)
+    }
+
+    @Test
+    fun viewingAWallpaperWithItsOwnSpeedDoesNotChangeTheLastPick() {
+        memory.pickedSpeed(4f)
+        memory.remember("a", EditChoice(0, 30_000, 4f, Focus.Center))
+        memory.pickedSpeed(0.5f)
+        memory.remember("b", EditChoice(0, 30_000, 0.5f, Focus.Center))
+        memory.remember("a", EditChoice(0, 30_000, 4f, Focus.Center)) // back on A, just looking
+        assertEquals(0.5f, memory.startingSpeed(), 0f)
     }
 
     @Test

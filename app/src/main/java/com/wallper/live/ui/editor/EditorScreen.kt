@@ -158,7 +158,7 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
         dock = {
             Dock(
                 speed = edit.speed,
-                onSpeed = { edit.speed = it },
+                onSpeed = edit::chooseSpeed,
                 onSpeedDone = {},
                 fragment = edit.fragment(),
                 hasFragment = true,
@@ -278,7 +278,7 @@ private fun DeviceViewer(uri: Uri, state: MainUiState, actions: EditorActions, m
         dock = {
             Dock(
                 speed = edit.speed,
-                onSpeed = { edit.speed = it },
+                onSpeed = edit::chooseSpeed,
                 onSpeedDone = {},
                 fragment = edit.fragment(),
                 hasFragment = true,
@@ -304,7 +304,19 @@ private class SourceEdit {
     var startMs by mutableLongStateOf(-1L)
     var loopMs by mutableLongStateOf(Playback.MAX_LOOP_MS)
     var speed by mutableFloatStateOf(Playback.DEFAULT_SPEED)
+
+    /** True once the speed was picked for this source (not carried over from another). */
+    var speedChosen by mutableStateOf(false)
     var focus by mutableStateOf(Focus.Center)
+
+    /** Called when the person picks a speed (not when one is restored or carried over). */
+    var onSpeedPicked: (Float) -> Unit = {}
+
+    fun chooseSpeed(value: Float) {
+        speed = value
+        speedChosen = true
+        onSpeedPicked(value)
+    }
     var committed by mutableStateOf<Pair<Long, Long>?>(null)
 
     fun fragment(): FragmentModel? {
@@ -344,15 +356,17 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
             if (saved != null) {
                 startMs = saved.startMs
                 loopMs = saved.loopMs
-                speed = saved.speed
+                speed = saved.speed ?: memory.startingSpeed()
+                speedChosen = saved.speed != null
                 focus = saved.focus
             } else {
                 speed = memory.startingSpeed()
             }
+            onSpeedPicked = memory::pickedSpeed
         }
     }
     LaunchedEffect(key) {
-        snapshotFlow { EditChoice(edit.startMs, edit.loopMs, edit.speed, edit.focus) }
+        snapshotFlow { EditChoice(edit.startMs, edit.loopMs, edit.speed.takeIf { edit.speedChosen }, edit.focus) }
             .collectLatest { choice ->
                 if (choice.startMs < 0) return@collectLatest
                 delay(SAVE_EDIT_MS) // not on every slider tick
