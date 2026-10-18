@@ -127,6 +127,27 @@ jobs:
           if $adb logcat -d -b crash | grep -q "Process: $pkg"; then echo "::error::The release app crashed"; exit 1; fi
           echo "Release app is running (pid $pid)"
 
+      # Error guessing at scale: 1,500 random taps, swipes and back presses inside the app
+      # (fixed seed, so a failure replays). Any crash or ANR fails the build.
+      - name: Monkey stress on the release APK
+        run: |
+          adb="$ANDROID_HOME/platform-tools/adb"
+          pkg=com.wallper.live
+          $adb logcat -c || true
+          set +e
+          $adb shell monkey -p $pkg -s 4242 --throttle 120 --pct-syskeys 0 --pct-appswitch 0 \
+            --ignore-security-exceptions -v 1500 > monkey.log 2>&1
+          code=$?
+          set -e
+          tail -15 monkey.log
+          echo "===== CRASHES ====="
+          $adb logcat -d -b crash | head -80
+          if grep -qE "CRASH|NOT RESPONDING" monkey.log || $adb logcat -d -b crash | grep -q "Process: $pkg"; then
+            echo "::error::The release app crashed or froze under random input"; exit 1
+          fi
+          [ "$code" = 0 ] || { echo "::error::monkey exited with $code"; exit 1; }
+          echo "1,500 random events, no crash"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

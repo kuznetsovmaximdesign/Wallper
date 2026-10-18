@@ -6,6 +6,7 @@ import android.app.UiAutomation
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -119,6 +120,47 @@ class AppRobot {
 
     fun string(id: Int): String = instrumentation.targetContext.getString(id)
 
+    /** Waits until something showing [text] (at the start of its text) is on screen. */
+    fun awaitText(text: String, timeoutMs: Long = UI_TIMEOUT_MS) {
+        val match = By.text(Pattern.compile(Pattern.quote(text) + ".*", Pattern.DOTALL))
+        if (!device.wait(Until.hasObject(match), timeoutMs)) fail("No '$text' on screen (in front: ${device.currentPackageName})")
+    }
+
+    /**
+     * Accessibility audit of what is on screen (Android accessibility / Material): every
+     * control has a label TalkBack can read, and fully visible ones are at least 48 dp.
+     */
+    fun accessibilityProblems(screen: String): List<String> {
+        SystemClock.sleep(SETTLE_MS)
+        reportViewIds()
+        val density = instrumentation.targetContext.resources.displayMetrics.density
+        val minPx = (MIN_TOUCH_DP - 1) * density
+        val width = device.displayWidth
+        val height = device.displayHeight
+        return device.findObjects(By.clickable(true).pkg(packageName)).mapNotNull { node ->
+            runCatching {
+                val b = node.visibleBounds
+                val name = node.resourceName ?: node.className
+                when {
+                    b.isEmpty -> null
+                    label(node).isBlank() -> "$screen: '$name' at $b has no label for TalkBack"
+                    // Cards cut by the screen or the grid edge are not too small, just partly visible.
+                    node.resourceName?.startsWith("card-") == true -> null
+                    b.left <= 0 || b.top <= 0 || b.right >= width || b.bottom >= height -> null
+                    b.width() < minPx || b.height() < minPx ->
+                        "$screen: '$name' is ${(b.width() / density).toInt()}×${(b.height() / density).toInt()} dp, below $MIN_TOUCH_DP dp"
+                    else -> null
+                }
+            }.getOrNull()
+        }
+    }
+
+    private fun label(node: UiObject2, depth: Int = 0): String {
+        val own = node.text?.takeIf { it.isNotBlank() } ?: node.contentDescription?.takeIf { it.isNotBlank() }
+        if (own != null || depth >= 3) return own.orEmpty()
+        return node.children.asSequence().map { label(it, depth + 1) }.firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+
     fun exists(tag: String, timeoutMs: Long = 1_000): Boolean {
         reportViewIds()
         return device.wait(Until.hasObject(By.res(tag)), timeoutMs)
@@ -160,8 +202,12 @@ class AppRobot {
         repeat(6) {
             reportViewIds()
             device.findObject(By.res(tag))?.takeIf { runCatching { it.visibleBounds.height() > 40 }.getOrDefault(false) }?.let { return it }
-            val x = device.displayWidth / 2
-            device.swipe(x, device.displayHeight * 3 / 4, x, device.displayHeight / 3, 30)
+            // Swipe inside the gallery: side by side, the screen's middle is the viewer's edge.
+            val grid = runCatching { bounds(TestTags.GRID) }.getOrNull()
+            val x = grid?.centerX() ?: (device.displayWidth / 2)
+            val top = grid?.top ?: 0
+            val span = grid?.height() ?: device.displayHeight
+            device.swipe(x, top + span * 3 / 4, x, top + span / 3, 30)
             SystemClock.sleep(SETTLE_MS)
         }
         return find(tag)
@@ -215,6 +261,77 @@ class AppRobot {
         SystemClock.sleep(SETTLE_MS)
     }
 
+    // region Device states: rotation, folding, network, theme, font size, process death
+
+    /** Runs a shell command as the shell user and returns its output. */
+    fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(automation().executeShellCommand(command))
+            .bufferedReader().use { it.readText() }
+
+    /** True when the screen is the Fold's inner panel (side-by-side layout). */
+    fun isUnfolded(): Boolean = minOf(device.displayWidth, device.displayHeight).toFloat() /
+        maxOf(device.displayWidth, device.displayHeight) > 0.7f
+
+    /** Simulates folding to the cover-sized phone screen or unfolding to the inner one. */
+    fun setUnfolded(unfolded: Boolean) {
+        if (unfolded) {
+            shell("wm size $INNER_SIZE")
+            shell("wm density $INNER_DENSITY")
+        } else {
+            shell("wm size reset")
+            shell("wm density reset")
+        }
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    fun setNetwork(on: Boolean) {
+        val verb = if (on) "enable" else "disable"
+        shell("svc wifi $verb")
+        shell("svc data $verb")
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    fun setDarkTheme(dark: Boolean) {
+        shell("cmd uimode night ${if (dark) "yes" else "no"}")
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    fun setFontScale(scale: Float) {
+        shell("settings put system font_scale $scale")
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    fun rotate(landscape: Boolean) {
+        if (landscape) device.setOrientationLeft() else device.setOrientationNatural()
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    /** Android killing the app in the background to free memory (it then restores itself). */
+    fun killInBackground() {
+        device.pressHome()
+        SystemClock.sleep(1_500)
+        shell("am kill $packageName")
+        SystemClock.sleep(1_000)
+    }
+
+    /** Puts back what a state test may have changed, whatever its outcome. */
+    fun restoreDevice() {
+        runCatching { device.setOrientationNatural() }
+        runCatching { device.unfreezeRotation() }
+        setNetwork(true)
+        shell("settings put system font_scale 1.0")
+        shell("cmd uimode night $initialNight")
+        shell(initialSize?.let { "wm size $it" } ?: "wm size reset")
+        shell(initialDensity?.let { "wm density $it" } ?: "wm density reset")
+        SystemClock.sleep(CONFIG_SETTLE_MS)
+    }
+
+    private val initialSize = Regex("Override size: (\\S+)").find(shell("wm size"))?.groupValues?.get(1)
+    private val initialDensity = Regex("Override density: (\\d+)").find(shell("wm density"))?.groupValues?.get(1)
+    private val initialNight = if (shell("cmd uimode night").contains("yes")) "yes" else "no"
+
+    // endregion
+
     /** Leaves the viewer: its back button on phones, system back in the side-by-side layout. */
     fun closeViewer() {
         if (exists(TestTags.BACK, 500)) tap(TestTags.BACK) else back()
@@ -247,5 +364,11 @@ class AppRobot {
         const val UI_TIMEOUT_MS = 10_000L
         const val SETTLE_MS = 400L
         const val STALE_RETRIES = 5
+        const val CONFIG_SETTLE_MS = 2_500L
+        const val MIN_TOUCH_DP = 48
+
+        /** Galaxy Z Fold inner panel, as emulated in CI. */
+        const val INNER_SIZE = "1840x2208"
+        const val INNER_DENSITY = 360
     }
 }

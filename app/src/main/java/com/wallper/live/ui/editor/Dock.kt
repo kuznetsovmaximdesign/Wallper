@@ -1,5 +1,6 @@
 package com.wallper.live.ui.editor
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -108,6 +109,9 @@ fun Dock(
     modifier: Modifier = Modifier,
 ) {
     var panel by rememberSaveable { mutableStateOf<DockPanel?>(null) }
+    // Back closes what is on top first (Material): an open panel, then framing, then the viewer.
+    BackHandler(enabled = framing) { onFraming() }
+    BackHandler(enabled = panel != null) { panel = null }
     Column(modifier.widthIn(max = 520.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         AnimatedVisibility(
             visible = panel != null,

@@ -1,6 +1,7 @@
 package com.wallper.live
 
 import android.app.Application
+import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
@@ -12,6 +13,7 @@ import com.wallper.live.data.catalog.AppleAerials
 import com.wallper.live.data.catalog.CatalogRepository
 import com.wallper.live.data.catalog.CatalogSource
 import com.wallper.live.data.library.ClipLibrary
+import com.wallper.live.data.settings.EditMemory
 import com.wallper.live.data.settings.SettingsRepository
 import com.wallper.live.media.ClipExporter
 import com.wallper.live.media.CoverRepository
@@ -73,6 +75,7 @@ class AppContainer(
     val exporter by lazy { ClipExporter(app, remoteFiles) }
 
     val probe by lazy { MediaProbe(app, remoteFiles) }
+    val edits by lazy { EditMemory(EditMemory.Preferences(app.getSharedPreferences("viewer-edits", Context.MODE_PRIVATE))) }
 
     val exports by lazy { ExportScheduler(WorkManager.getInstance(app)) }
 

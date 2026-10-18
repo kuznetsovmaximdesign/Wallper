@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.wallper.live.R
 import com.wallper.live.WallperApplication
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -82,13 +84,15 @@ sealed interface UiEvent {
     data object OpenPicker : UiEvent
 }
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(application: Application, private val saved: SavedStateHandle) : AndroidViewModel(application) {
 
     private val container = (application as WallperApplication).container
 
-    private val tab = MutableStateFlow(HomeTab.Apple)
-    private val category = MutableStateFlow<FootageCategory?>(null)
+    // Where the person was survives the process being killed in the background.
+    private val tab = MutableStateFlow(saved.get<String>(KEY_TAB)?.let { name -> HomeTab.entries.find { it.name == name } } ?: HomeTab.Apple)
+    private val category = MutableStateFlow(saved.get<String>(KEY_CATEGORY)?.let { name -> FootageCategory.entries.find { it.name == name } })
     private val editor = MutableStateFlow<EditorTarget?>(null)
+    private var restoringFootage = false
     private val liveActive = MutableStateFlow(LiveWallpaper.isActive(application))
     private val pendingDeletes = MutableStateFlow<Set<String>>(emptySet())
 
@@ -124,6 +128,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var jobsPrimed = false
 
     init {
+        restoreEditor(saved.get<String>(KEY_EDITOR))
+        viewModelScope.launch { tab.collect { saved[KEY_TAB] = it.name } }
+        viewModelScope.launch { category.collect { saved[KEY_CATEGORY] = it?.name } }
+        // While a wallpaper waits for the catalog to come back, keep it saved.
+        viewModelScope.launch { editor.collect { if (it != null || !restoringFootage) saved[KEY_EDITOR] = encode(it) } }
         container.catalog.refresh()
         viewModelScope.launch { container.exports.jobs.collect { onJobs(it) } }
     }
@@ -133,6 +142,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun retryCatalog() = container.catalog.refresh(force = true)
 
     fun open(target: EditorTarget) = editor.update { target }
+
+    private fun encode(target: EditorTarget?): String? = when (target) {
+        is EditorTarget.FromFootage -> "footage:" + target.footage.id
+        is EditorTarget.FromClip -> "clip:" + target.clipId
+        is EditorTarget.FromDevice -> "device:" + target.uri
+        null -> null
+    }
+
+    private fun restoreEditor(saved: String?) {
+        val kind = saved?.substringBefore(':') ?: return
+        val value = saved.substringAfter(':')
+        when (kind) {
+            "clip" -> editor.value = EditorTarget.FromClip(value)
+            "device" -> editor.value = EditorTarget.FromDevice(Uri.parse(value))
+            // Footage comes back once the catalog has loaded again.
+            "footage" -> {
+                restoringFootage = true
+                viewModelScope.launch {
+                    val ready = container.catalog.state.first { it is CatalogState.Ready } as CatalogState.Ready
+                    val footage = ready.items.firstOrNull { it.id == value }
+                    restoringFootage = false
+                    if (footage != null && editor.value == null) editor.value = EditorTarget.FromFootage(footage)
+                }
+            }
+        }
+    }
     fun closeEditor() = editor.update { null }
 
     fun refreshLiveWallpaper() {
@@ -264,3 +299,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _events.trySend(event)
     }
 }
+
+private const val KEY_TAB = "tab"
+private const val KEY_CATEGORY = "category"
+private const val KEY_EDITOR = "editor"

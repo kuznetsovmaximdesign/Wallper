@@ -134,6 +134,48 @@ class ViewerTest {
         Screen.assertKeepsPlaying(app::videoArea, 2_000, "after closing the menu")
     }
 
+    /** Side by side on the Fold the gallery stays visible: picking another card must switch the viewer. */
+    @Test
+    fun choosingAnotherWallpaperInTheGallerySwitchesTheViewer() {
+        app.openFootage(SCENE_A)
+        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "first wallpaper")
+        if (!app.exists(TestTags.GRID, 1_000)) app.closeViewer() // a phone shows one at a time
+        app.openFootage(SCENE_B)
+        assertEquals("Сцена B", app.awaitTitleChange("Сцена A"))
+        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "after choosing another wallpaper")
+        Screen.assertKeepsPlaying(app::videoArea, 2_000, "the chosen wallpaper")
+    }
+
+    /** Each wallpaper keeps its settings; one not yet touched starts at the speed picked last. */
+    @Test
+    fun settingsStayWithEachWallpaper() {
+        app.openFootage(SCENE_A)
+        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "first wallpaper")
+        app.tap(TestTags.DOCK_SPEED)
+        app.dragSlider(TestTags.SPEED_SLIDER, 1.5f)
+        assertEquals("4×", app.text(TestTags.DOCK_SPEED))
+        app.tap(TestTags.DOCK_SPEED)
+
+        app.tap(TestTags.NEXT)
+        assertEquals("Сцена B", app.awaitTitleChange("Сцена A"))
+        assertEquals("The chosen speed carries over", "4×", app.text(TestTags.DOCK_SPEED))
+        app.tap(TestTags.DOCK_SPEED)
+        app.dragSlider(TestTags.SPEED_SLIDER, -1.5f)
+        assertEquals("0.5×", app.text(TestTags.DOCK_SPEED))
+        app.tap(TestTags.DOCK_SPEED)
+        SystemClock.sleep(800) // remembered shortly after the change
+
+        app.tap(TestTags.PREVIOUS)
+        assertEquals("Сцена A", app.awaitTitleChange("Сцена B"))
+        assertEquals("A keeps its own speed", "4×", app.text(TestTags.DOCK_SPEED))
+        Screen.awaitMoving(app::videoArea, START_TIMEOUT_MS, "back on the first wallpaper")
+
+        // And after leaving the viewer altogether.
+        app.closeViewer()
+        app.openFootage(SCENE_B)
+        assertEquals("B keeps its own speed", "0.5×", app.text(TestTags.DOCK_SPEED))
+    }
+
     @Test
     fun backToGalleryKeepsCardsPlaying() {
         app.openFootage(SCENE_A)

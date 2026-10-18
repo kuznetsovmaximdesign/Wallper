@@ -72,6 +72,7 @@ import com.wallper.live.core.Playback
 import com.wallper.live.core.WallpaperRoles
 import com.wallper.live.core.WallpaperTarget
 import com.wallper.live.core.formatDuration
+import com.wallper.live.data.settings.EditChoice
 import com.wallper.live.media.ClipSource
 import com.wallper.live.playback.LoopSpec
 import com.wallper.live.ui.EditorTarget
@@ -83,6 +84,7 @@ import com.wallper.live.ui.components.TestTags
 import com.wallper.live.ui.components.focusDrag
 import java.io.File
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /** Callbacks of the viewer, grouped to keep call sites readable. */
@@ -331,11 +333,37 @@ private class SourceEdit {
 @Composable
 private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit {
     val context = LocalContext.current
-    val probe = remember(context) { (context.applicationContext as WallperApplication).container.probe }
-    val edit = remember(key) { SourceEdit() }
+    val container = remember(context) { (context.applicationContext as WallperApplication).container }
+    val probe = container.probe
+    val memory = container.edits
+    // Coming back to a wallpaper restores what was chosen for it; a new one starts at the
+    // speed picked last.
+    val edit = remember(key) {
+        SourceEdit().apply {
+            val saved = memory.choiceFor(key)
+            if (saved != null) {
+                startMs = saved.startMs
+                loopMs = saved.loopMs
+                speed = saved.speed
+                focus = saved.focus
+            } else {
+                speed = memory.startingSpeed()
+            }
+        }
+    }
+    LaunchedEffect(key) {
+        snapshotFlow { EditChoice(edit.startMs, edit.loopMs, edit.speed, edit.focus) }
+            .collectLatest { choice ->
+                if (choice.startMs < 0) return@collectLatest
+                delay(SAVE_EDIT_MS) // not on every slider tick
+                memory.remember(key, choice)
+            }
+    }
     LaunchedEffect(key) {
         val total = probe.durationMs(probeSource) ?: return@LaunchedEffect
         edit.duration = total
+        // A remembered fragment that no longer fits the video starts over.
+        if (edit.startMs + Playback.MIN_LOOP_MS > total) edit.startMs = -1L
         if (edit.startMs < 0) {
             // Default fragment: 20% in (past Apple's fade-in), 30 s long.
             edit.startMs = (total * 0.2).toLong().coerceAtMost((total - Playback.MIN_LOOP_MS).coerceAtLeast(0))
@@ -367,6 +395,14 @@ private fun <T> rememberViewerPager(
     LaunchedEffect(pagerState, items) {
         snapshotFlow { pagerState.settledPage }.collect { index ->
             items.getOrNull(index)?.let { if (id(it) != latestId) settle(it) }
+        }
+    }
+    // A wallpaper chosen outside the pager (the gallery beside it on a Fold) moves it there;
+    // otherwise the pager would keep showing the previous one.
+    LaunchedEffect(pagerState, items, currentId) {
+        val index = items.indexOfFirst { id(it) == currentId }
+        if (index >= 0 && index != pagerState.currentPage && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(index)
         }
     }
     return pagerState
@@ -556,7 +592,7 @@ private fun ViewerFrame(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Color.White)
                 }
             } else {
-                Spacer(Modifier.size(44.dp))
+                Spacer(Modifier.size(TOUCH_TARGET))
             }
             AnimatedVisibility(framing, enter = fadeIn(), exit = fadeOut()) {
                 GlassSurface(RoundedCornerShape(50)) {
@@ -573,7 +609,7 @@ private fun ViewerFrame(
                     Icon(Icons.Filled.Delete, stringResource(R.string.action_delete), tint = Color.White)
                 }
             } else {
-                Spacer(Modifier.size(44.dp))
+                Spacer(Modifier.size(TOUCH_TARGET))
             }
         }
 
@@ -613,7 +649,8 @@ private fun RoundGlassButton(onClick: () -> Unit, modifier: Modifier = Modifier,
             containerColor = Color.Black.copy(alpha = 0.42f),
             contentColor = Color.White,
         ),
-        modifier = modifier.size(44.dp),
+        // 48 dp: the minimum touch target of Material and Android accessibility.
+        modifier = modifier.size(TOUCH_TARGET),
         content = content,
     )
 }
@@ -644,5 +681,7 @@ private var swipeHintShown = false
 // endregion
 
 private const val COVER_FADE_MS = 320
+private val TOUCH_TARGET = 48.dp
 private const val START_HOLD_MS = 8_000L
+private const val SAVE_EDIT_MS = 300L
 private const val PORTRAIT_LIMIT = 0.8f
