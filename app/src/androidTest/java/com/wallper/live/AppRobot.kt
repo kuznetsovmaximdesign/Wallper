@@ -143,16 +143,31 @@ class AppRobot {
                 val name = node.resourceName ?: node.className
                 when {
                     b.isEmpty -> null
-                    label(node).isBlank() -> "$screen: '$name' at $b has no label for TalkBack"
-                    // Cards cut by the screen or the grid edge are not too small, just partly visible.
-                    node.resourceName?.startsWith("card-") == true -> null
+                    // Cut by the screen or a scrolling row/grid: partly visible, judged once scrolled in.
                     b.left <= 0 || b.top <= 0 || b.right >= width || b.bottom >= height -> null
+                    clippedByScroller(node, b) -> null
+                    label(node).isBlank() -> "$screen: '$name' at $b has no label for TalkBack"
+                    node.resourceName?.startsWith("card-") == true -> null
                     b.width() < minPx || b.height() < minPx ->
                         "$screen: '$name' is ${(b.width() / density).toInt()}×${(b.height() / density).toInt()} dp, below $MIN_TOUCH_DP dp"
                     else -> null
                 }
             }.getOrNull()
         }
+    }
+
+    /** Whether a scrollable ancestor cuts [bounds] at one of its edges. */
+    private fun clippedByScroller(node: UiObject2, bounds: Rect): Boolean {
+        var parent = node.parent
+        repeat(4) {
+            val p = parent ?: return false
+            if (p.isScrollable) {
+                val pb = p.visibleBounds
+                return bounds.left <= pb.left || bounds.top <= pb.top || bounds.right >= pb.right || bounds.bottom >= pb.bottom
+            }
+            parent = p.parent
+        }
+        return false
     }
 
     private fun label(node: UiObject2, depth: Int = 0): String {

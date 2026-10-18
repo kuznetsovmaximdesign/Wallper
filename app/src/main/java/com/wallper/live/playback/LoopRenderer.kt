@@ -105,6 +105,7 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     private val textures = IntArray(2)
     private val surfaceTextures = arrayOfNulls<SurfaceTexture>(2)
     private val frameAvailable = Array(2) { AtomicBoolean(false) }
+    @Volatile private var lastFrameNanos = 0L
     private val hasFrame = BooleanArray(2)
     private val matrices = Array(2) { FloatArray(16) }
 
@@ -114,6 +115,7 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
     val target: VideoTarget = object : VideoTarget {
         override val surfaces: List<Surface>? get() = this@LoopRenderer.surfaces
         override var onSurfacesChanged: (() -> Unit)? = null
+        override val lastFrameNanos: Long get() = this@LoopRenderer.lastFrameNanos
 
         override fun present(front: Int, mix: Float) {
             this@LoopRenderer.front = front
@@ -187,6 +189,7 @@ class LoopRenderer(private val requestRender: () -> Unit) : GLSurfaceView.Render
             GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
             val st = SurfaceTexture(textures[i])
             st.setOnFrameAvailableListener {
+                lastFrameNanos = System.nanoTime()
                 frameAvailable[i].set(true)
                 requestRender()
             }

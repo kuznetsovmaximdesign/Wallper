@@ -18,4 +18,7 @@ interface VideoTarget {
     fun present(front: Int, mix: Float)
 
     fun setVideoSize(width: Int, height: Int, pixelRatio: Float)
+
+    /** [System.nanoTime] of the latest decoded picture to arrive, 0 when none yet. */
+    val lastFrameNanos: Long get() = 0L
 }

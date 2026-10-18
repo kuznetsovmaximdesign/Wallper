@@ -64,6 +64,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -418,6 +420,8 @@ private fun MediaCard(
             .aspectRatio(if (hero) HERO_RATIO else CARD_RATIO)
             .clip(shape)
             .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, shape) else Modifier)
+            // One clear label for TalkBack, even when the title text is scrolled out of view.
+            .semantics { contentDescription = listOfNotNull(title, caption).joinToString(", ") }
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .testTag(tag),
     ) {
@@ -429,7 +433,7 @@ private fun MediaCard(
             val lowRes = cover is String
             AsyncImage(
                 model = cover,
-                contentDescription = title,
+                contentDescription = null, // the card itself is labelled
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().then(if (lowRes) Modifier.blur(LOW_RES_BLUR) else Modifier),
             )

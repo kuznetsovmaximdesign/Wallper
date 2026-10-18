@@ -303,7 +303,7 @@ jobs:
             awk '/^"main"/{p=1} p{print} p&&/^$/{exit}' anr.txt | head -45
           done
           echo "===== APP ====="
-          timeout 20 $adb logcat -d | grep -E "WallperScreen|WallperTest|WallperMotion|WallperCovers|WallperCodec" | grep -vE ": \s+at (android|java|kotlin|kotlinx|com\.android)\." | tail -80 || true
+          timeout 20 $adb logcat -d | grep -E "WallperScreen|WallperTest|WallperMotion|WallperCovers|WallperCodec|WallperSession" | grep -vE ": \s+at (android|java|kotlin|kotlinx|com\.android)\." | tail -80 || true
 
       - uses: actions/upload-artifact@v4
         if: always()

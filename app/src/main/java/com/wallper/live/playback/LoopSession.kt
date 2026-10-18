@@ -2,6 +2,7 @@ package com.wallper.live.playback
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Choreographer
 
 /**
@@ -58,6 +59,36 @@ class LoopSession(
         }
     }
 
+    /**
+     * Never frozen: if pictures stop arriving while playing (a decoder that lost its
+     * output after a surface change, a stalled stream), the output path is rebuilt and
+     * playback resumes where it was.
+     */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (released || !playing) return
+            val last = target?.lastFrameNanos ?: 0L
+            val player = players.getOrNull(front)
+            if (last > 0 && player?.isReady == true && System.nanoTime() - last > STALL_NANOS) {
+                Log.w(TAG, "no picture for ${(System.nanoTime() - last) / 1_000_000} ms while playing: recovering")
+                players.forEach { it.setSurface(null) }
+                bindSurfaces()
+                players.getOrNull(1 - front)?.let {
+                    it.pause()
+                    it.seekToStart()
+                }
+                player.seekToStart(player.positionMs.coerceIn(0, spec.loopMs))
+                player.play()
+                fading = false
+                mix = 0f
+                target?.present(front, 0f)
+                main.postDelayed(this, STALL_NANOS / 1_000_000 * 2) // give it time to come back
+                return
+            }
+            main.postDelayed(this, WATCHDOG_MS)
+        }
+    }
+
     /** The cross-fade partner is created once the front player shows its first picture. */
     private var wantsFade = seamless && spec.fadeMs > 0
 
@@ -104,12 +135,15 @@ class LoopSession(
         players[front].play()
         if (fading) players[1 - front].play()
         startTicking()
+        main.removeCallbacks(watchdog)
+        main.postDelayed(watchdog, WATCHDOG_MS)
     }
 
     fun pause() {
         playing = false
         players.forEach { it.pause() }
         stopTicking()
+        main.removeCallbacks(watchdog)
     }
 
     fun release() {
@@ -213,6 +247,9 @@ class LoopSession(
     }
 
     private companion object {
+        const val TAG = "WallperSession"
+        const val WATCHDOG_MS = 1_000L
+        const val STALL_NANOS = 3_000_000_000L
         const val RETRY_BASE_MS = 1_000L
         const val RETRY_MAX_MS = 8_000L
     }
