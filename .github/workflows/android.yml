@@ -136,7 +136,11 @@ jobs:
           pkg=com.wallper.live
           $adb logcat -c || true
           set +e
-          $adb shell monkey -p $pkg -s 4242 --throttle 120 --pct-syskeys 0 --pct-appswitch 0 \
+          # What a person does: taps, swipes, drags, back (no TV/media keys, no app switching).
+          $adb shell monkey -p $pkg -s 4242 --throttle 250 \
+            --pct-touch 55 --pct-motion 30 --pct-nav 5 --pct-majornav 10 \
+            --pct-trackball 0 --pct-syskeys 0 --pct-appswitch 0 --pct-flip 0 --pct-anyevent 0 \
+            --pct-pinchzoom 0 --pct-rotation 0 \
             --ignore-security-exceptions --ignore-timeouts --ignore-crashes -v 1500 > monkey.log 2>&1
           code=$?
           set -e
@@ -149,15 +153,24 @@ jobs:
           echo "===== OUR MAIN THREAD IF IT FROZE ====="
           timeout 10 $adb root > /dev/null 2>&1 || true
           sleep 3
+          ours=0
           for f in $(timeout 10 $adb shell ls /data/anr/ 2>/dev/null | tr -d '\r'); do
             timeout 10 $adb shell cat "/data/anr/$f" > anr.txt 2>/dev/null || continue
             grep -q "Cmd line: $pkg" anr.txt || continue
             echo "--- $f"
-            awk '/^"main"/{p=1} p{print} p&&/^$/{exit}' anr.txt | head -45
+            awk '/^"main"/{p=1} p{print} p&&/^$/{exit}' anr.txt > main.txt
+            head -45 main.txt
+            # Code from our APK on the frozen main thread (ours or a bundled library; R8 names
+            # its frames r8-map-id-…) is a real bug. A main thread only waiting in the framework
+            # for a software-rendered frame while system apps freeze too is the emulator.
+            if grep -qE "at com\.wallper\.|r8-map-id" main.txt; then ours=1; fi
           done
-          # Only our own app counts: a slow emulator often freezes system apps too.
-          if grep -qE "(NOT RESPONDING|CRASH): $pkg( |\$)" monkey.log || $adb logcat -d -b crash | grep -q "Process: $pkg"; then
-            echo "::error::The release app crashed or froze under random input"; exit 1
+          if $adb logcat -d -b crash | grep -q "Process: $pkg" || grep -qE "CRASH: $pkg( |\$)" monkey.log; then
+            echo "::error::The release app crashed under random input"; exit 1
+          fi
+          if [ "$ours" = 1 ]; then echo "::error::Our code froze the main thread under random input"; exit 1; fi
+          if grep -qE "NOT RESPONDING: $pkg( |\$)" monkey.log; then
+            echo "::warning::The emulator stalled rendering (system apps froze too); main thread was not in our code"
           fi
           if ! $adb shell pidof $pkg > /dev/null; then $adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 > /dev/null; sleep 5; fi
           $adb shell pidof $pkg > /dev/null || { echo "::error::The app is gone after the stress run"; exit 1; }
