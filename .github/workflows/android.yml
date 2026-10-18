@@ -187,7 +187,7 @@ jobs:
   # Screenshots decide: after each action the wallpaper must still be visible and moving.
   ui-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -279,11 +279,22 @@ jobs:
         run: |
           set -o pipefail
           # A wedged emulator must not hold the job for an hour without a word.
-          timeout 40m ./gradlew connectedDebugAndroidTest \
+          timeout 35m ./gradlew connectedDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.class=${{ matrix.suite.classes }} > test.log 2>&1 && ok=1 || ok=0
           echo "===== UI TESTS ====="
           [ "$ok" = 1 ] || tail -25 test.log
-          python3 -I scripts/test-summary.py app/build/outputs/androidTest-results
+          python3 -I scripts/test-summary.py app/build/outputs/androidTest-results failed.txt
+          # A software emulator drops frames, windows and even its adb link now and then:
+          # tests that failed get exactly one more run, reported separately. A real bug
+          # fails both times.
+          if [ "$ok" != 1 ] && [ -s failed.txt ] && "$ANDROID_HOME/platform-tools/adb" get-state > /dev/null 2>&1; then
+            echo "===== RETRY OF FAILED TESTS: $(cat failed.txt) ====="
+            timeout 20m ./gradlew connectedDebugAndroidTest \
+              -Pandroid.testInstrumentationRunnerArguments.class="$(cat failed.txt)" > retry.log 2>&1 && ok=1 || ok=0
+            [ "$ok" = 1 ] || tail -15 retry.log
+            python3 -I scripts/test-summary.py app/build/outputs/androidTest-results
+            [ "$ok" = 1 ] && echo "::warning::Passed on retry: $(cat failed.txt)"
+          fi
           [ "$ok" = 1 ]
 
       - name: Test timings

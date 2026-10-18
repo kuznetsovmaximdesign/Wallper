@@ -51,11 +51,17 @@ class AppRobot {
     }
 
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        val start = SystemClock.elapsedRealtime()
+        val deadline = start + timeoutMs
+        var refreshed = false
         while (SystemClock.elapsedRealtime() < deadline) {
             reportViewIds()
             device.findObject(By.res(tag))?.let { return it }
             dismissSystemDialog()
+            if (!refreshed && SystemClock.elapsedRealtime() - start > REFRESH_AFTER_MS) {
+                refreshed = true
+                refreshAccessibility()
+            }
             SystemClock.sleep(250)
         }
         val visibleText = device.findObjects(By.textStartsWith("")).mapNotNull { it.text }.take(12)
@@ -376,6 +382,22 @@ class AppRobot {
         fun automation(): UiAutomation = InstrumentationRegistry.getInstrumentation()
             .getUiAutomation(Configurator.getInstance().uiAutomationFlags)
 
+        /**
+         * Nodes fetched while view ids were off stay cached without them after a window
+         * change (a sheet, the system picker): drop the cache so they are fetched again.
+         */
+        fun refreshAccessibility() {
+            val automation = automation()
+            runCatching {
+                val info = automation.serviceInfo ?: return@runCatching
+                info.flags = info.flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
+                automation.serviceInfo = info
+                info.flags = info.flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                automation.serviceInfo = info
+            }
+            if (Build.VERSION.SDK_INT >= 34) runCatching { automation.clearCache() }
+        }
+
         /** Compose exposes test tags as view ids only while the service asks for them. */
         fun reportViewIds() {
             val automation = automation()
@@ -390,6 +412,7 @@ class AppRobot {
         const val UI_TIMEOUT_MS = 10_000L
         const val SETTLE_MS = 400L
         const val STALE_RETRIES = 5
+        const val REFRESH_AFTER_MS = 3_000L
         const val CONFIG_SETTLE_MS = 2_500L
         const val MIN_TOUCH_DP = 48
 
