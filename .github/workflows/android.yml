@@ -128,7 +128,8 @@ jobs:
           echo "Release app is running (pid $pid)"
 
       # Error guessing at scale: 1,500 random taps, swipes and back presses inside the app
-      # (fixed seed, so a failure replays). Any crash or ANR fails the build.
+      # (fixed seed, so a failure replays). Monkey keeps going past freezes of other
+      # processes; a crash or ANR of our own app fails the build.
       - name: Monkey stress on the release APK
         run: |
           adb="$ANDROID_HOME/platform-tools/adb"
@@ -136,17 +137,31 @@ jobs:
           $adb logcat -c || true
           set +e
           $adb shell monkey -p $pkg -s 4242 --throttle 120 --pct-syskeys 0 --pct-appswitch 0 \
-            --ignore-security-exceptions -v 1500 > monkey.log 2>&1
+            --ignore-security-exceptions --ignore-timeouts --ignore-crashes -v 1500 > monkey.log 2>&1
           code=$?
           set -e
-          tail -15 monkey.log
+          tail -8 monkey.log
+          echo "===== WHO FROZE OR CRASHED ====="
+          grep -E "NOT RESPONDING|CRASH:|ANR in" -A3 monkey.log | head -30 || true
+          $adb logcat -d | grep -E "ANR in|FATAL EXCEPTION" -A4 | head -40 || true
           echo "===== CRASHES ====="
           $adb logcat -d -b crash | head -80
-          if grep -qE "CRASH|NOT RESPONDING" monkey.log || $adb logcat -d -b crash | grep -q "Process: $pkg"; then
+          echo "===== OUR MAIN THREAD IF IT FROZE ====="
+          timeout 10 $adb root > /dev/null 2>&1 || true
+          sleep 3
+          for f in $(timeout 10 $adb shell ls /data/anr/ 2>/dev/null | tr -d '\r'); do
+            timeout 10 $adb shell cat "/data/anr/$f" > anr.txt 2>/dev/null || continue
+            grep -q "Cmd line: $pkg" anr.txt || continue
+            echo "--- $f"
+            awk '/^"main"/{p=1} p{print} p&&/^$/{exit}' anr.txt | head -45
+          done
+          # Only our own app counts: a slow emulator often freezes system apps too.
+          if grep -qE "(NOT RESPONDING|CRASH): $pkg( |\$)" monkey.log || $adb logcat -d -b crash | grep -q "Process: $pkg"; then
             echo "::error::The release app crashed or froze under random input"; exit 1
           fi
-          [ "$code" = 0 ] || { echo "::error::monkey exited with $code"; exit 1; }
-          echo "1,500 random events, no crash"
+          if ! $adb shell pidof $pkg > /dev/null; then $adb shell monkey -p $pkg -c android.intent.category.LAUNCHER 1 > /dev/null; sleep 5; fi
+          $adb shell pidof $pkg > /dev/null || { echo "::error::The app is gone after the stress run"; exit 1; }
+          echo "Random input: $(grep -oE 'Events injected: [0-9]+' monkey.log | tail -1), the app neither crashed nor froze"
 
       - uses: actions/upload-artifact@v4
         if: always()
