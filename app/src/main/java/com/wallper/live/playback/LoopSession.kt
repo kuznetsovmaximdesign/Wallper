@@ -62,15 +62,19 @@ class LoopSession(
     /**
      * Never frozen: if pictures stop arriving while playing (a decoder that lost its
      * output after a surface change, a stalled stream), the output path is rebuilt and
-     * playback resumes where it was.
+     * playback resumes where it was. A new target (e.g. after rotating) that never gets
+     * its first picture counts too.
      */
     private val watchdog = object : Runnable {
         override fun run() {
             if (released || !playing) return
-            val last = target?.lastFrameNanos ?: 0L
+            val now = System.nanoTime()
+            val current = target
+            val since = maxOf(current?.lastFrameNanos ?: 0L, watchingSince)
             val player = players.getOrNull(front)
-            if (last > 0 && player?.isReady == true && System.nanoTime() - last > STALL_NANOS) {
-                Log.w(TAG, "no picture for ${(System.nanoTime() - last) / 1_000_000} ms while playing: recovering")
+            if (current?.surfaces != null && player?.isReady == true && now - since > STALL_NANOS) {
+                Log.w(TAG, "no picture for ${(now - since) / 1_000_000} ms while playing: recovering")
+                watchingSince = now
                 players.forEach { it.setSurface(null) }
                 bindSurfaces()
                 players.getOrNull(1 - front)?.let {
@@ -88,6 +92,9 @@ class LoopSession(
             main.postDelayed(this, WATCHDOG_MS)
         }
     }
+
+    /** [System.nanoTime] since when pictures are expected: playing started or the target changed. */
+    private var watchingSince = 0L
 
     /** The cross-fade partner is created once the front player shows its first picture. */
     private var wantsFade = seamless && spec.fadeMs > 0
@@ -117,6 +124,7 @@ class LoopSession(
         target?.onSurfacesChanged = null
         target = newTarget
         newTarget.onSurfacesChanged = { bindSurfaces() }
+        watchingSince = System.nanoTime()
         bindSurfaces()
         videoSize?.let { (w, h, ratio) -> newTarget.setVideoSize(w, h, ratio) }
         newTarget.present(front, mix)
@@ -131,6 +139,7 @@ class LoopSession(
 
     fun play() {
         if (released) return
+        if (!playing) watchingSince = System.nanoTime()
         playing = true
         players[front].play()
         if (fading) players[1 - front].play()
