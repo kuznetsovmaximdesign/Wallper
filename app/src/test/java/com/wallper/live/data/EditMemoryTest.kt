@@ -65,7 +65,7 @@ class EditMemoryTest {
     fun brokenOrOutOfRangeEntriesAreSafe() {
         map["edit:x"] = "garbage"
         assertNull(memory.choiceFor("x"))
-        map["edit:y"] = "1000;20000;9.0;1.7;-2"
+        map["edit:y"] = "v2;1000;20000;9.0;1.7;-2"
         assertEquals(EditChoice(1_000, 20_000, Playback.MAX_SPEED, Focus(1f, 0f)), memory.choiceFor("y"))
         map["last-speed"] = "not a number"
         assertEquals(Playback.DEFAULT_SPEED, memory.startingSpeed(), 0f)
