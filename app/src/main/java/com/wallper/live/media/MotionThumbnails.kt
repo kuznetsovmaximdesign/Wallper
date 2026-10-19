@@ -33,11 +33,13 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /**
- * "Live thumbnails": a seamless ~5.5 s, 576×1024 H.264 loop cut from each video and
- * cached, plus a sharp poster frame.
+ * "Live thumbnails": a light, seamless ~5.5 s 432×768 H.264 loop cut from each video as
+ * a ×2 time-lapse (11 s of the scene) and cached, plus a sharp poster frame.
  *
  * Cards can then play real motion several at a time, which full 4K streams cannot.
  * The pipeline decodes the source straight into an OpenGL texture (dropping upper
@@ -58,6 +60,22 @@ class MotionThumbnails(
     }.asCoroutineDispatcher()
     private val inFlight = ConcurrentHashMap<String, CompletableDeferred<File?>>()
     private val holds = AtomicInteger()
+    private val foreground = MutableStateFlow(true)
+
+    /** Thrown inside a cut when the app went to the background. */
+    private class Interrupted : Exception()
+
+    /** The app came to the front (true) or left it (false). */
+    fun setForeground(value: Boolean) {
+        foreground.value = value
+    }
+
+    init {
+        // Loops of earlier generations are cut again in the current form.
+        Thread {
+            directory.listFiles()?.filterNot { it.name.startsWith("$VERSION-") }?.forEach { it.delete() }
+        }.start()
+    }
     private val failedAt = ConcurrentHashMap<String, Long>()
 
     /**
@@ -87,15 +105,23 @@ class MotionThumbnails(
         val existing = inFlight.putIfAbsent(id, deferred)
         if (existing != null) return existing.await()
         try {
-            val result = withContext(dispatcher) {
-                val began = System.nanoTime()
-                runCatching { generate(uri, fileOf(id), posterOf(id)) }
-                    .onSuccess { Log.i(TAG, "$id ready in ${(System.nanoTime() - began) / 1_000_000}ms") }
-                    .onFailure {
-                        failedAt[id] = SystemClock.elapsedRealtime()
-                        Log.w(TAG, "$id failed", it)
-                    }
-                    .getOrNull()
+            var result: File?
+            while (true) {
+                // Cut only while the app is on screen; in the background the codecs belong to
+                // the live wallpaper. An interrupted cut starts over on return.
+                foreground.first { it }
+                val outcome = withContext(dispatcher) {
+                    val began = System.nanoTime()
+                    runCatching { generate(uri, fileOf(id), posterOf(id)) }
+                        .onSuccess { Log.i(TAG, "$id ready in ${(System.nanoTime() - began) / 1_000_000}ms") }
+                }
+                if (outcome.exceptionOrNull() is Interrupted) continue
+                outcome.exceptionOrNull()?.let {
+                    failedAt[id] = SystemClock.elapsedRealtime()
+                    Log.w(TAG, "$id failed", it)
+                }
+                result = outcome.getOrNull()
+                break
             }
             deferred.complete(result)
             return result
@@ -105,8 +131,8 @@ class MotionThumbnails(
         }
     }
 
-    private fun fileOf(id: String) = File(directory, "$id.mp4")
-    private fun posterOf(id: String) = File(directory, "$id.jpg")
+    private fun fileOf(id: String) = File(directory, "$VERSION-$id.mp4")
+    private fun posterOf(id: String) = File(directory, "$VERSION-$id.jpg")
 
     private fun generate(uri: String, out: File, poster: File): File {
         directory.mkdirs()
@@ -129,9 +155,13 @@ class MotionThumbnails(
             val format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME)!!
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
-            val startUs = if (durationUs > LENGTH_US * 3) (durationUs * 0.3).toLong() else 0L
-            val endUs = startUs + LENGTH_US
-            val maxLayer = HevcTemporalLayers.scanMaxLayer(extractor, format, startUs, FPS.toDouble())
+            // A ×2 time-lapse: twice the source time in the same loop length shows at a
+            // glance what the video holds.
+            val sourceUs = LENGTH_US * SPEEDUP
+            val startUs = if (durationUs > sourceUs * 2) (durationUs * 0.3).toLong().coerceAtMost(durationUs - sourceUs) else 0L
+            val endUs = startUs + sourceUs
+            // The time-lapse keeps every SPEEDUP-th picture: decode only the layers it needs.
+            val maxLayer = HevcTemporalLayers.scanMaxLayer(extractor, format, startUs, FPS.toDouble() / SPEEDUP)
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
             val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) format.getInteger(MediaFormat.KEY_ROTATION) else 0
@@ -180,7 +210,9 @@ class MotionThumbnails(
             var lastProgress = System.nanoTime()
 
             while (!encoderDone) {
+                if (!foreground.value) throw Interrupted()
                 while (holds.get() > 0) {
+                    if (!foreground.value) throw Interrupted()
                     Thread.sleep(HOLD_POLL_MS)
                     lastProgress = System.nanoTime()
                 }
@@ -221,7 +253,7 @@ class MotionThumbnails(
                             val time = info.presentationTimeUs
                             // Sources above the loop's frame rate (60 fps, layer-dropped HFR) are
                             // decimated: drawing and encoding pictures that get dropped is waste.
-                            val render = time >= startUs && time <= endUs && time - lastRenderedUs >= FRAME_US * 9 / 10
+                            val render = time >= startUs && time <= endUs && time - lastRenderedUs >= FRAME_US * SPEEDUP * 9 / 10
                             dec.releaseOutputBuffer(index, render)
                             if (render) {
                                 lastRenderedUs = time
@@ -236,7 +268,7 @@ class MotionThumbnails(
                                 }
                                 st.updateTexImage()
                                 st.getTransformMatrix(matrix)
-                                val local = time - startUs
+                                val local = (time - startUs) / SPEEDUP
                                 when {
                                     // The opening is kept to be blended into the ending.
                                     local < FADE_US -> crop.keepHead(texture, matrix, local.toFloat() / FADE_US)
@@ -300,11 +332,15 @@ class MotionThumbnails(
     private companion object {
         const val TAG = "WallperMotion"
         const val PARALLEL = 2
-        const val WIDTH = 576
-        const val HEIGHT = 1024
+        /** Cache generation: bump when the loops change, so old ones are cut again. */
+        const val VERSION = "v2"
+        // Light: the size of a card on a Fold, not of the screen.
+        const val WIDTH = 432
+        const val HEIGHT = 768
         const val FPS = 30
-        const val BITRATE = 3_000_000
-        /** Source window; the loop itself is LENGTH_US - FADE_US long. */
+        const val BITRATE = 1_500_000
+        const val SPEEDUP = 2
+        /** Loop window in output time; the loop itself is LENGTH_US - FADE_US long. */
         const val LENGTH_US = 6_000_000L
         const val FADE_US = 500_000L
         const val TICK_US = 10_000L

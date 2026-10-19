@@ -1,0 +1,15 @@
+name: Probe Aerials categories (metadata)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_categories.sh
+      - .github/workflows/probe-categories.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/probe_categories.sh

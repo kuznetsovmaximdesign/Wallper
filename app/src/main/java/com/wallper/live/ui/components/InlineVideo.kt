@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
+import android.os.SystemClock
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.animation.core.animateFloatAsState
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +31,8 @@ import com.wallper.live.playback.LoopPlayer
 import com.wallper.live.playback.LoopSpec
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** TextureView that center-crops its video, so it can live inside rounded, clipped cards. */
 @SuppressLint("ViewConstructor")
@@ -84,6 +88,19 @@ fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
         failed = false
         attempt++
     }
+    // Decoders are held only while the app is on screen: in the background they would
+    // compete with the live wallpaper and leave nothing for the return.
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
+    val onScreen = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    // Players start one after another, so a screenful of cards does not grab every
+    // decoder in the same instant (that is when frames drop).
+    var cleared by remember(spec) { mutableStateOf(false) }
+    LaunchedEffect(spec, onScreen) {
+        cleared = false
+        if (!onScreen) return@LaunchedEffect
+        StartGate.await()
+        cleared = true
+    }
     LaunchedEffect(spec) {
         container.network.changes.drop(1).collect {
             if (failed) {
@@ -93,7 +110,11 @@ fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
         }
     }
 
-    DisposableEffect(spec, lifecycle, attempt) {
+    DisposableEffect(spec, lifecycle, attempt, cleared) {
+        if (!cleared) {
+            rendered = false
+            return@DisposableEffect onDispose {}
+        }
         val player = factory.create(spec)
         player.repeat = true
         player.listener = object : LoopPlayer.Listener {
@@ -149,5 +170,18 @@ fun InlineVideo(spec: LoopSpec, modifier: Modifier = Modifier) {
     AndroidView(factory = { view }, modifier = modifier.fillMaxSize().alpha(alpha))
 }
 
+/** Spaces out the start of card players. */
+private object StartGate {
+    private val mutex = Mutex()
+    private var lastStart = 0L
+
+    suspend fun await() = mutex.withLock {
+        val wait = lastStart + START_GAP_MS - SystemClock.elapsedRealtime()
+        if (wait > 0) delay(wait)
+        lastStart = SystemClock.elapsedRealtime()
+    }
+}
+
+private const val START_GAP_MS = 180L
 private const val RETRY_BASE_MS = 1_500L
 private const val RETRY_MAX_MS = 12_000L

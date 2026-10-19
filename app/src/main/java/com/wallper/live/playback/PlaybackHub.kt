@@ -190,6 +190,10 @@ class PlaybackHub(
 
     private companion object {
         const val PAUSE_GRACE_MS = 400L
-        const val RELEASE_AFTER_MS = 120_000L
+        /**
+         * Hidden longer than this (the app or another one in front), the decoders are given
+         * back; the wallpaper resumes from the same position, over its last frame.
+         */
+        const val RELEASE_AFTER_MS = 5_000L
     }
 }

@@ -53,7 +53,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -122,14 +121,9 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
     val motion = container.motionThumbs
     val items = state.visibleFootage.takeIf { list -> list.any { it.id == footage.id } } ?: listOf(footage)
     val edit = rememberSourceEdit(footage.id, ClipSource.of(footage.previewUrl ?: footage.masterUrl))
-    // Light 1080p stream when Apple has one; otherwise the 4K 240 fps master, played by
-    // the layer-dropping decoder at 60/30 fps.
-    val preview = footage.previewUrl
-    val spec = if (preview != null) {
-        edit.spec(Uri.parse(preview), highFrameRate = false)
-    } else {
-        edit.spec(Uri.parse(footage.masterUrl), highFrameRate = true)
-    }
+    // The viewer shows the very 4K master the wallpaper is cut from, never a softer
+    // 1080p stream; 240 fps masters play through the layer-dropping decoder at 60/30 fps.
+    val spec = edit.spec(Uri.parse(footage.masterUrl), highFrameRate = footage.highFrameRate)
     var framing by remember { mutableStateOf(false) }
     LaunchedEffect(footage.id) { framing = false } // swiping must always mean "next wallpaper"
     val pager = rememberViewerPager(items, footage.id, { it.id }) { actions.onOpen(EditorTarget.FromFootage(it)) }
@@ -146,7 +140,8 @@ private fun FootageViewer(footage: Footage, state: MainUiState, actions: EditorA
             ViewerPager(pager, items, footage.id, { it.id }, !framing) { item, active ->
                 VideoPage(
                     spec = if (active) spec else null,
-                    still = covers.cached(item) ?: motion.poster(item.id) ?: item.coverUrl,
+                    // Sharp stills only (cut from the master); Apple's tiny ones are not shown.
+                    still = covers.cached(item) ?: motion.poster(item.id),
                     loop = if (active) motion.cached(item.id) else null,
                     state = state,
                     speed = edit.speed,
@@ -512,7 +507,7 @@ private fun VideoPage(
     }
 }
 
-/** A still frame; Apple's small stills are softened instead of showing their pixels. */
+/** A still frame, always a sharp one cut on the device. */
 @Composable
 private fun Still(model: Any, focus: Focus) {
     AsyncImage(
@@ -520,9 +515,7 @@ private fun Still(model: Any, focus: Focus) {
         contentDescription = null,
         contentScale = ContentScale.Crop,
         alignment = BiasAlignment(focus.x * 2f - 1f, focus.y * 2f - 1f),
-        modifier = Modifier
-            .fillMaxSize()
-            .then(if (model is String) Modifier.blur(16.dp) else Modifier),
+        modifier = Modifier.fillMaxSize(),
     )
 }
 

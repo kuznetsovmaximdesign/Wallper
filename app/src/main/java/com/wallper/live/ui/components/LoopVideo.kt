@@ -10,7 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -19,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.wallper.live.WallperApplication
 import com.wallper.live.core.Focus
@@ -63,10 +67,26 @@ fun LoopVideo(
     val view = remember(context) { LoopVideoView(context) }
     var session by remember { mutableStateOf<LoopSession?>(null) }
 
+    // In the background the decoders are given back (to the live wallpaper and other
+    // apps); on return the video resumes where it was, over its last frame.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
+    val onScreen = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    var resumeAtMs by remember(spec) { mutableLongStateOf(0L) }
+
     // A new spec (fragment, loop setting…) gets a new session, but the current one keeps
     // playing until the new one is ready, so the picture never stops or goes black.
-    LaunchedEffect(spec, seamless) {
-        val created = spec?.let { container.newLoopSession(it, seamless) }
+    LaunchedEffect(spec, seamless, onScreen) {
+        if (!onScreen) {
+            session?.let {
+                resumeAtMs = it.positionMs
+                it.detach(view.renderer.target)
+                it.release()
+            }
+            session = null
+            return@LaunchedEffect
+        }
+        val created = spec?.let { container.newLoopSession(it, seamless, resumeAtMs) }
         var swapped = false
         try {
             val previous = session

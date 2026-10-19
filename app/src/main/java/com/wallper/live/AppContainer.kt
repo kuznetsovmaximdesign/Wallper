@@ -88,5 +88,6 @@ class AppContainer(
     val playbackHub by lazy { PlaybackHub(app, loopPlayers, library, settings, mainScope) }
 
     /** A standalone loop for in-app previews (not shared with the wallpaper). */
-    fun newLoopSession(spec: LoopSpec, seamless: Boolean): LoopSession = LoopSession(loopPlayers, spec, seamless)
+    fun newLoopSession(spec: LoopSpec, seamless: Boolean, startPositionMs: Long = 0): LoopSession =
+        LoopSession(loopPlayers, spec, seamless, startPositionMs)
 }

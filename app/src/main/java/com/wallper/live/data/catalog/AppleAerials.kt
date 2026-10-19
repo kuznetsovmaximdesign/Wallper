@@ -112,7 +112,20 @@ class AppleAerials(
                 )
             }
         }
-        return result.distinctBy { it.id }.sortedBy { it.category.ordinal }
+        return interleave(result.distinctBy { it.id })
+    }
+
+    /**
+     * "All" mixes the categories (a landscape, an underwater scene, a city, …) instead of
+     * listing dozens of landscapes first; within a category Apple's own order is kept.
+     */
+    internal fun interleave(items: List<Footage>): List<Footage> {
+        val queues = items.groupBy { it.category }.toSortedMap(compareBy { it.ordinal }).values.map { ArrayDeque(it) }
+        val mixed = ArrayList<Footage>(items.size)
+        while (mixed.size < items.size) {
+            for (queue in queues) queue.removeFirstOrNull()?.let(mixed::add)
+        }
+        return mixed
     }
 
     /** Keys linking the same shot across feeds: shot id and the master's file stem. */

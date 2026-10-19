@@ -32,7 +32,10 @@ class AppleAerialsTest {
              "url-1080-H264": "https://sylvan.apple.com/Videos/comp_GMT312_AFRICA_NIGHT_2K_AVC.mov"},
             {"id": "TV-ONLY", "accessibilityLabel": "Iceland", "categories": [], "shotID": "I003",
              "url-4K-SDR": "https://sylvan.apple.com/Aerials/2x/Videos/I003_C008_SDR_4K_HEVC.mov"},
-            {"id": "NO-VIDEO", "accessibilityLabel": "Nothing"}
+            {"id": "NO-VIDEO", "accessibilityLabel": "Nothing"},
+            {"id": "HD-ONLY", "accessibilityLabel": "London", "categories": [], "shotID": "L004",
+             "url-1080-H264": "https://sylvan.apple.com/Videos/L004_2K_AVC.mov",
+             "url-1080-SDR": "https://sylvan.apple.com/Videos/L004_1080_SDR.mov"}
           ]
         }
     """.trimIndent()
@@ -104,6 +107,26 @@ class AppleAerialsTest {
         assertFalse(items.any { it.id == "TV-SEALS" || it.id == "TV-AFRICA" })
         assertEquals("Исландия", items.first { it.id == "TV-ONLY" }.title)
         assertFalse(items.any { it.id == "NO-VIDEO" })
+    }
+
+    /** Only scenes with a 4K master are offered: nothing softer ever becomes a wallpaper. */
+    @Test
+    fun onlyScenesWithA4kMasterAreListed() {
+        val items = aerials.merge(macFeed(), tvFeed())
+        assertFalse("1080p-only scenes are left out", items.any { it.id == "HD-ONLY" })
+        // Every master must be one of the feeds' 4K files.
+        val fourK = Regex("\"url-4K-SDR(?:-240FPS)?\": \"([^\"]+)\"")
+            .findAll(tvEntries + macEntries).map { it.groupValues[1] }.toSet()
+        for (item in items) assertTrue("${item.id} master must be 4K: ${item.masterUrl}", item.masterUrl in fourK)
+    }
+
+    /** "All" starts with one scene of each category, not with every landscape. */
+    @Test
+    fun allMixesTheCategories() {
+        val items = aerials.merge(macFeed(), tvFeed())
+        val categories = items.map { it.category }.distinct()
+        assertEquals("the first scenes cover every category", categories.toSet(), items.take(categories.size).map { it.category }.toSet())
+        assertEquals(items.size, items.map { it.id }.toSet().size)
     }
 
     @Test

@@ -56,7 +56,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -88,6 +87,7 @@ import com.wallper.live.ui.components.pressScale
 import com.wallper.live.ui.components.shimmer
 import com.wallper.live.work.ExportJob
 import java.io.File
+import kotlinx.coroutines.delay
 
 /**
  * Video-first gallery: a hero card, a grid of portrait cards and a floating toolbar.
@@ -120,7 +120,16 @@ fun HomeScreen(
         }
     }
     val centered by remember(gridState, mediaIds) { derivedStateOf { centeredItems(gridState, mediaIds, MAX_LIVE_CARDS) } }
-    val playing = if (autoplay) centered else emptySet()
+    // Live previews follow the scroll only once it settles: starting and stopping
+    // decoders while the grid moves is what makes scrolling stutter. Cards already
+    // playing keep playing while they stay on screen.
+    var live by remember(mediaIds) { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(centered, gridState.isScrollInProgress) {
+        if (gridState.isScrollInProgress) return@LaunchedEffect
+        delay(LIVE_SETTLE_MS)
+        live = centered
+    }
+    val playing = if (autoplay) live else emptySet()
 
     // Start from the top whenever the content set changes.
     LaunchedEffect(state.tab, state.category) { gridState.scrollToItem(0) }
@@ -312,21 +321,31 @@ private fun FootageCard(
     val container = remember(context) { (context.applicationContext as WallperApplication).container }
     val covers = container.covers
     val motion = container.motionThumbs
-    // Apple's own stills are tiny (356 px): until something sharp exists they are shown blurred.
+    // Only sharp pictures cut from the 4K master are shown. Apple's own stills are tiny
+    // (356 px), so until a sharp one exists the card shows its placeholder instead.
     var cover by remember(footage.id) {
         mutableStateOf<Any?>(
             if (hero) {
-                covers.cached(footage) ?: motion.poster(footage.id) ?: footage.coverUrl
+                covers.cached(footage) ?: motion.poster(footage.id)
             } else {
-                motion.poster(footage.id) ?: covers.cached(footage) ?: footage.coverUrl
+                motion.poster(footage.id) ?: covers.cached(footage)
             },
         )
     }
     var loop by remember(footage.id) { mutableStateOf(if (hero) null else motion.cached(footage.id)) }
     LaunchedEffect(footage.id) {
+        // The full-width card wants the big frame even when a small poster exists.
+        if (if (hero) covers.cached(footage) != null else cover != null) return@LaunchedEffect
+        // Cards merely scrolled past are not worth decoding a 4K frame for.
+        if (!hero) delay(COVER_SETTLE_MS)
+        // A frame of the 4K master (up to 2560 px); a live loop may replace it later.
+        covers.cover(footage)?.let { if (cover == null || hero) cover = it }
+    }
+    // Live loops are cut only for cards the person stopped on, not for every card the
+    // grid scrolls past (cutting decodes video too).
+    LaunchedEffect(footage.id, playing) {
+        if (!playing) return@LaunchedEffect
         if (hero) {
-            // Full-width card: a 2560 px frame of the master, the live stream plays over it.
-            if (covers.cached(footage) == null) covers.cover(footage)?.let { cover = it }
             // Its live loop is not shown here, but lets the viewer move the instant it opens.
             motion.get(footage.id, footage.previewUrl ?: footage.masterUrl)
         } else if (loop == null) {
@@ -334,7 +353,7 @@ private fun FootageCard(
             if (made != null) {
                 motion.poster(footage.id)?.let { cover = it }
                 loop = made
-            } else if (cover !is File) {
+            } else if (cover == null) {
                 covers.cover(footage)?.let { cover = it }
             }
         }
@@ -376,8 +395,8 @@ private fun ClipCard(
     // The clip itself is 4K: a light loop cut from it lets several cards play at once.
     val motionId = "clip-${clip.id}"
     var loop by remember(clip.id) { mutableStateOf(motion.cached(motionId)) }
-    LaunchedEffect(clip.id) {
-        if (loop == null) loop = motion.get(motionId, Uri.fromFile(library.fileOf(clip)).toString())
+    LaunchedEffect(clip.id, playing) {
+        if (playing && loop == null) loop = motion.get(motionId, Uri.fromFile(library.fileOf(clip)).toString())
     }
     MediaCard(
         tag = TestTags.card(clip.id),
@@ -429,13 +448,11 @@ private fun MediaCard(
         // card would keep every card redrawing for nothing.
         if (cover == null) Box(Modifier.fillMaxSize().shimmer()) else Box(Modifier.fillMaxSize().background(CardPlaceholder))
         if (cover != null) {
-            // A remote URL is Apple's small still: soften it instead of showing pixels.
-            val lowRes = cover is String
             AsyncImage(
                 model = cover,
                 contentDescription = null, // the card itself is labelled
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().then(if (lowRes) Modifier.blur(LOW_RES_BLUR) else Modifier),
+                modifier = Modifier.fillMaxSize(),
             )
         }
         if (video != null) InlineVideo(video)
@@ -534,8 +551,10 @@ private fun ProgressBadge(progress: Float) {
 
 private const val CARD_RATIO = 9f / 16f
 private val CardPlaceholder = Color(0xFF15151B)
-private const val MAX_LIVE_CARDS = 6
-private val LOW_RES_BLUR = 14.dp
+private const val MAX_LIVE_CARDS = 4
+private const val LIVE_SETTLE_MS = 250L
+/** A card that stays this long on screen gets a sharp cover cut from the 4K master. */
+private const val COVER_SETTLE_MS = 400L
 private const val HERO_RATIO = 4f / 5f
 private const val PREVIEW_START_MS = 30_000L
 private const val PREVIEW_LENGTH_MS = 20_000L
