@@ -59,8 +59,9 @@ class VideoWallpaperService : WallpaperService() {
             override fun onSensorChanged(event: SensorEvent) {
                 val angle = event.values[0]
                 lastHingeAngle = angle
-                // Stops-only sensors (Samsung: 0/90/180°) get the softer spring.
-                if (angle % 90f == 0f) renderer.hingeCoarse = true
+                // A reading between the stops proves a fine sensor. (Exactly 0° or 180° proves
+                // nothing: every sensor reports those when shut or flat.)
+                if (angle % 90f != 0f) renderer.hingeCoarse = false
                 renderer.setHingeAngle(angle)
             }
 
@@ -138,8 +139,10 @@ class VideoWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(visible: Boolean) {
             if (visible) {
-                // On a foldable the hinge drives the glass; elsewhere play the wake reveal.
-                if (renderer.panel == PanelKind.Regular) renderer.reveal()
+                // The inner panel follows the hinge as it opens. The cover panel lights up
+                // when the phone is all but shut, after the hinge has stopped: it shows the
+                // glass clearing, like a regular phone waking up.
+                if (renderer.panel != PanelKind.Inner) renderer.reveal()
                 setHingeTracking(true)
                 glView?.onResume()
                 refreshRole()

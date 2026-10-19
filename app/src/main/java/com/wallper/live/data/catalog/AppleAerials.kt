@@ -87,7 +87,12 @@ class AppleAerials(
                     title = feed.strings[asset.localizedNameKey] ?: AppleTitles.russian(asset.accessibilityLabel),
                     collection = asset.subcategories.firstNotNullOfOrNull { subcategories[it] }
                         ?.let { feed.strings[it] },
-                    category = asset.categories.firstNotNullOfOrNull { categories[it] } ?: FootageCategory.Landscapes,
+                    category = Topics.of(
+                        asset.categories.firstNotNullOfOrNull { categories[it] } ?: FootageCategory.Landscapes,
+                        asset.subcategories.firstNotNullOfOrNull { subcategories[it] },
+                        asset.accessibilityLabel,
+                    ),
+                    night = Topics.isNight(asset.accessibilityLabel),
                     masterUrl = twin?.url4kSdr ?: master240,
                     previewUrl = twin?.let { it.url1080H264 ?: it.url1080Sdr },
                     coverUrl = asset.previewImage,
@@ -104,7 +109,12 @@ class AppleAerials(
                     id = asset.id,
                     title = feed.strings[asset.localizedNameKey] ?: AppleTitles.russian(asset.accessibilityLabel),
                     collection = null,
-                    category = asset.categories.firstNotNullOfOrNull { categories[it] } ?: FootageCategory.Landscapes,
+                    category = Topics.of(
+                        asset.categories.firstNotNullOfOrNull { categories[it] } ?: FootageCategory.Landscapes,
+                        null,
+                        asset.accessibilityLabel,
+                    ),
+                    night = Topics.isNight(asset.accessibilityLabel),
                     masterUrl = asset.url4kSdr!!,
                     previewUrl = asset.url1080H264 ?: asset.url1080Sdr,
                     coverUrl = asset.previewImage,
@@ -151,7 +161,7 @@ class AppleAerials(
         key.contains("Underwater", ignoreCase = true) -> FootageCategory.Underwater
         key.contains("Space", ignoreCase = true) -> FootageCategory.Space
         key.contains("Cities", ignoreCase = true) -> FootageCategory.Cities
-        key.contains("Mac", ignoreCase = true) -> FootageCategory.Mac
+        key.contains("Mac", ignoreCase = true) -> FootageCategory.Abstract
         else -> FootageCategory.Landscapes
     }
 

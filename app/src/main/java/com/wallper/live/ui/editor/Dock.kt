@@ -181,7 +181,7 @@ private fun DockToggle(label: String, checked: Boolean, tag: String, enabled: Bo
         contentPadding = PaddingValues(horizontal = 11.dp),
         modifier = Modifier.heightIn(min = 40.dp).testTag(tag),
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
 
@@ -207,14 +207,14 @@ private fun InstallSplitButton(model: InstallModel, onInstall: (WallpaperTarget)
                     trackColor = Color.Black.copy(alpha = 0.15f),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("${(model.progress!! * 100).toInt()}%", fontWeight = FontWeight.SemiBold)
+                Text("${(model.progress!! * 100).toInt()}%", fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
             }
             model.done -> {
                 Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.action_applied), style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.action_applied), style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
             }
-            else -> Text(stringResource(R.string.action_install), style = MaterialTheme.typography.labelLarge)
+            else -> Text(stringResource(R.string.action_install), style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
         }
     }
     val install = {
@@ -257,7 +257,7 @@ private fun InstallSplitButton(model: InstallModel, onInstall: (WallpaperTarget)
                     modifier = Modifier.semantics { testTagsAsResourceId = true }, // a popup window
                 ) {
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.install_lock)) },
+                        text = { Text(stringResource(R.string.install_lock), maxLines = 1, softWrap = false) },
                         leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
                         modifier = Modifier.testTag(TestTags.INSTALL_LOCK),
                         onClick = {
@@ -266,7 +266,7 @@ private fun InstallSplitButton(model: InstallModel, onInstall: (WallpaperTarget)
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.install_both)) },
+                        text = { Text(stringResource(R.string.install_both), maxLines = 1, softWrap = false) },
                         leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
                         modifier = Modifier.testTag(TestTags.INSTALL_BOTH),
                         onClick = {

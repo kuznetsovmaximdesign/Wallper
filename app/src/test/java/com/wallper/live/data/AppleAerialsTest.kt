@@ -90,7 +90,10 @@ class AppleAerialsTest {
         assertEquals("https://sylvan.apple.com/tahoe.jpg", tahoe.coverUrl)
         assertTrue(tahoe.highFrameRate)
         assertNull(tahoe.previewUrl)
-        assertEquals(FootageCategory.Mac, items.first { it.id == "MAC-PURPLE" }.category)
+        assertEquals(FootageCategory.Abstract, items.first { it.id == "MAC-PURPLE" }.category)
+        // Apple's Landscapes are split by place: Tahoe is a mountain lake.
+        assertEquals(FootageCategory.Mountains, tahoe.category)
+        assertTrue(items.first { it.id == "MAC-AFRICA" }.night)
     }
 
     @Test

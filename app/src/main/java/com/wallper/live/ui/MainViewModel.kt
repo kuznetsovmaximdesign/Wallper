@@ -60,7 +60,14 @@ data class MainUiState(
     val separateLock: Boolean = WallpaperRoles.separateLockSupported,
 ) {
     val visibleFootage: List<Footage>
-        get() = (catalog as? CatalogState.Ready)?.items.orEmpty().filter { category == null || it.category == category }
+        get() = (catalog as? CatalogState.Ready)?.items.orEmpty().filter { category == null || category.includes(it) }
+
+    /** Topics that have scenes, in the order of the filter buttons. */
+    val categories: List<FootageCategory>
+        get() {
+            val items = (catalog as? CatalogState.Ready)?.items.orEmpty()
+            return FootageCategory.entries.filter { topic -> items.any(topic::includes) }
+        }
 
     fun runningExport(footageId: String?): ExportJob? =
         exports.firstOrNull { it.footageId == footageId && it.state == ExportJob.State.Running }

@@ -216,7 +216,7 @@ private fun LazyGridScope.appleTab(
     selectedId: String?,
     playing: Set<String>,
 ) {
-    fullWidth("categories") { Categories(state.category, onCategory) }
+    fullWidth("categories") { Categories(state.categories, state.category, onCategory) }
     when (state.catalog) {
         CatalogState.Loading -> {
             fullWidth("hero-skeleton") { Box(Modifier.aspectRatio(HERO_RATIO).clip(HeroShape).shimmer()) }
@@ -225,7 +225,7 @@ private fun LazyGridScope.appleTab(
         CatalogState.Error -> fullWidth("error") {
             Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(stringResource(R.string.catalog_error), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
+                TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry), maxLines = 1, softWrap = false) }
             }
         }
         is CatalogState.Ready -> {
@@ -278,19 +278,28 @@ private fun LazyGridScope.mineTab(
     }
 }
 
+private fun labelOf(category: FootageCategory): Int = when (category) {
+    FootageCategory.Mountains -> R.string.category_mountains
+    FootageCategory.Forests -> R.string.category_forests
+    FootageCategory.Coasts -> R.string.category_coasts
+    FootageCategory.Deserts -> R.string.category_deserts
+    FootageCategory.Meadows -> R.string.category_meadows
+    FootageCategory.Ice -> R.string.category_ice
+    FootageCategory.Landscapes -> R.string.category_landscapes
+    FootageCategory.Cities -> R.string.category_cities
+    FootageCategory.Underwater -> R.string.category_underwater
+    FootageCategory.Space -> R.string.category_space
+    FootageCategory.Night -> R.string.category_night
+    FootageCategory.Abstract -> R.string.category_abstract
+}
+
 /** Expressive toggle buttons: the selected one fills and morphs from a pill to a rounded square. */
 @Composable
-private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?) -> Unit) {
-    val options = listOf(
-        null to R.string.category_all,
-        FootageCategory.Landscapes to R.string.category_landscapes,
-        FootageCategory.Underwater to R.string.category_underwater,
-        FootageCategory.Space to R.string.category_space,
-        FootageCategory.Cities to R.string.category_cities,
-        FootageCategory.Mac to R.string.category_mac,
-    )
+private fun Categories(available: List<FootageCategory>, selected: FootageCategory?, onCategory: (FootageCategory?) -> Unit) {
+    // Only topics that have scenes get a button.
+    val options = listOf<FootageCategory?>(null) + available
     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 6.dp)) {
-        items(options, key = { it.second }) { (category, label) ->
+        items(options, key = { it?.name ?: "All" }) { category ->
             ToggleButton(
                 checked = selected == category,
                 onCheckedChange = { onCategory(category) },
@@ -302,7 +311,12 @@ private fun Categories(selected: FootageCategory?, onCategory: (FootageCategory?
                 ),
                 modifier = Modifier.testTag(TestTags.category(category?.name ?: "All")),
             ) {
-                Text(stringResource(label), style = MaterialTheme.typography.labelLarge)
+                Text(
+                    stringResource(category?.let(::labelOf) ?: R.string.category_all),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -519,7 +533,7 @@ private fun ToolbarTab(label: String, selected: Boolean, tag: String, onClick: (
         elevation = null,
         modifier = Modifier.testTag(tag),
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
 
@@ -533,7 +547,7 @@ private fun StatusBadge(label: Int) {
     ) {
         Box(Modifier.size(7.dp).background(Color(0xFF5BE38A), CircleShape))
         Spacer(Modifier.width(6.dp))
-        Text(stringResource(label), style = MaterialTheme.typography.labelMedium, color = Color.White)
+        Text(stringResource(label), style = MaterialTheme.typography.labelMedium, color = Color.White, maxLines = 1, softWrap = false)
     }
 }
 

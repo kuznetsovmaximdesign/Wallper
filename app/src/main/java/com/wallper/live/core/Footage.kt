@@ -18,12 +18,30 @@ data class Footage(
     val coverUrl: String?,
     /** Master is above 60 fps (Apple's 240 fps macOS Aerials); reduced when cut. */
     val highFrameRate: Boolean,
+    /** A night scene (also listed under [FootageCategory.Night]). */
+    val night: Boolean = false,
 )
 
+/**
+ * Topics of the gallery, in the order of its filter buttons. Apple's "Landscapes" (half
+ * of all scenes) is split by place into mountains, forests, coasts and so on;
+ * [Landscapes] remains for nature that fits none of them. [Night] is not a scene's own
+ * category but a filter over all of them.
+ */
 enum class FootageCategory {
+    Mountains,
+    Forests,
+    Coasts,
+    Deserts,
+    Meadows,
+    Ice,
     Landscapes,
+    Cities,
     Underwater,
     Space,
-    Cities,
-    Mac,
+    Night,
+    Abstract,
+    ;
+
+    fun includes(footage: Footage): Boolean = if (this == Night) footage.night else footage.category == this
 }

@@ -123,8 +123,9 @@ class HingeFrost {
 
         private const val FINE_OMEGA = 16f // ≈ 0.3 s to settle
         private const val COARSE_OMEGA = 9f // ≈ 0.55 s across a 90° stop
-        private const val FINE_SETTLE_NANOS = 450_000_000L
-        private const val COARSE_SETTLE_NANOS = 800_000_000L
+        // Long enough that a hand pausing mid-unfold does not clear and re-frost the glass.
+        private const val FINE_SETTLE_NANOS = 1_200_000_000L
+        private const val COARSE_SETTLE_NANOS = 1_500_000_000L
 
         /** The angle at which a panel is sharp: flat for the inner one, shut for the cover. */
         fun restAngle(panel: PanelKind): Float = if (panel == PanelKind.Cover) 0f else OPEN

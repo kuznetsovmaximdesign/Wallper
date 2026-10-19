@@ -607,6 +607,8 @@ private fun ViewerFrame(
                         stringResource(R.string.hint_frame),
                         style = MaterialTheme.typography.labelLarge,
                         color = Color.White,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                     )
                 }
@@ -677,6 +679,8 @@ private fun SwipeHint(modifier: Modifier) {
                 stringResource(R.string.hint_swipe),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.White,
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             )
         }
