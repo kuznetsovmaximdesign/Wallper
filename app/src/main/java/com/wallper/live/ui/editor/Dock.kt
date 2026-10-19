@@ -72,7 +72,7 @@ import com.wallper.live.ui.components.GlassSurface
 import com.wallper.live.ui.components.Haptics
 import com.wallper.live.ui.components.TestTags
 
-/** A ≤ 30 s window inside a longer video. */
+/** A window of at most [Playback.MAX_LOOP_MS] inside a longer video. */
 class FragmentModel(
     val totalMs: Long,
     val startMs: Long,

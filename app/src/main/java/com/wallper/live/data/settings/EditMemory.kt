@@ -7,8 +7,13 @@ import com.wallper.live.core.Playback
 /**
  * What a person chose for one source in the viewer. [speed] is null until they pick a
  * speed for this very source: until then it follows the speed picked last anywhere.
+ * [startMs] is [DEFAULT_FRAGMENT] while the fragment was never moved.
  */
-data class EditChoice(val startMs: Long, val loopMs: Long, val speed: Float?, val focus: Focus)
+data class EditChoice(val startMs: Long, val loopMs: Long, val speed: Float?, val focus: Focus) {
+    companion object {
+        const val DEFAULT_FRAGMENT = -1L
+    }
+}
 
 /**
  * Remembers viewer choices per wallpaper, across switching and restarts: coming back
@@ -40,14 +45,19 @@ class EditMemory(private val store: Store) {
     }
 
     private fun encode(c: EditChoice) =
-        listOf(c.startMs, c.loopMs, c.speed?.toString().orEmpty(), c.focus.x, c.focus.y).joinToString(";")
+        listOf(VERSION, c.startMs, c.loopMs, c.speed?.toString().orEmpty(), c.focus.x, c.focus.y).joinToString(";")
 
     private fun decode(text: String): EditChoice? {
-        val parts = text.split(';')
-        if (parts.size != 5) return null
+        var parts = text.split(';')
+        // Records from before v2 saved every fragment, moved or not, under the old 30 s
+        // cap: their fragment goes back to the default, the rest is kept.
+        val current = parts.size == 6 && parts[0] == VERSION
+        if (current) parts = parts.drop(1) else if (parts.size != 5) return null
+        val startMs = parts[0].toLongOrNull() ?: return null
+        val loopMs = parts[1].toLongOrNull() ?: return null
         return EditChoice(
-            startMs = parts[0].toLongOrNull() ?: return null,
-            loopMs = parts[1].toLongOrNull() ?: return null,
+            startMs = if (current && startMs >= 0) startMs else EditChoice.DEFAULT_FRAGMENT,
+            loopMs = if (current && startMs >= 0) loopMs else 0,
             speed = if (parts[2].isEmpty()) null else parts[2].toFloatOrNull()?.let(Playback::clampSpeed) ?: return null,
             focus = Focus(
                 x = parts[3].toFloatOrNull()?.coerceIn(0f, 1f) ?: return null,
@@ -67,5 +77,6 @@ class EditMemory(private val store: Store) {
     private companion object {
         const val PREFIX = "edit:"
         const val LAST_SPEED = "last-speed"
+        const val VERSION = "v2"
     }
 }

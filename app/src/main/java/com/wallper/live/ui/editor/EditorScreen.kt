@@ -304,6 +304,9 @@ private class SourceEdit {
     var speedChosen by mutableStateOf(false)
     var focus by mutableStateOf(Focus.Center)
 
+    /** True once the fragment was moved for this source; otherwise it follows [Playback.defaultFragment]. */
+    var fragmentChosen by mutableStateOf(false)
+
     /** Called when the person picks a speed (not when one is restored or carried over). */
     var onSpeedPicked: (Float) -> Unit = {}
 
@@ -320,6 +323,7 @@ private class SourceEdit {
         return FragmentModel(total, startMs, loopMs) { start, loop ->
             startMs = start
             loopMs = loop
+            fragmentChosen = true
         }
     }
 
@@ -349,8 +353,11 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
         SourceEdit().apply {
             val saved = memory.choiceFor(key)
             if (saved != null) {
-                startMs = saved.startMs
-                loopMs = saved.loopMs
+                if (saved.startMs >= 0) {
+                    startMs = saved.startMs
+                    loopMs = saved.loopMs
+                    fragmentChosen = true
+                }
                 speed = saved.speed ?: memory.startingSpeed()
                 speedChosen = saved.speed != null
                 focus = saved.focus
@@ -361,9 +368,15 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
         }
     }
     LaunchedEffect(key) {
-        snapshotFlow { EditChoice(edit.startMs, edit.loopMs, edit.speed.takeIf { edit.speedChosen }, edit.focus) }
+        // Only a fragment the person moved is kept: an untouched one follows the default,
+        // which may grow (it did, from 30 s to 2 min).
+        snapshotFlow {
+            if (edit.startMs < 0) null
+            else if (edit.fragmentChosen) EditChoice(edit.startMs, edit.loopMs, edit.speed.takeIf { edit.speedChosen }, edit.focus)
+            else EditChoice(EditChoice.DEFAULT_FRAGMENT, 0, edit.speed.takeIf { edit.speedChosen }, edit.focus)
+        }
             .collectLatest { choice ->
-                if (choice.startMs < 0) return@collectLatest
+                if (choice == null) return@collectLatest
                 delay(SAVE_EDIT_MS) // not on every slider tick
                 memory.remember(key, choice)
             }
@@ -372,12 +385,14 @@ private fun rememberSourceEdit(key: String, probeSource: ClipSource): SourceEdit
         val total = probe.durationMs(probeSource) ?: return@LaunchedEffect
         edit.duration = total
         // A remembered fragment that no longer fits the video starts over.
-        if (edit.startMs + Playback.MIN_LOOP_MS > total) edit.startMs = -1L
+        if (edit.startMs + Playback.MIN_LOOP_MS > total) {
+            edit.startMs = -1L
+            edit.fragmentChosen = false
+        }
         if (edit.startMs < 0) {
-            // Default fragment: 20% in (past Apple's fade-in), 30 s long.
-            edit.startMs = (total * 0.2).toLong().coerceAtMost((total - Playback.MIN_LOOP_MS).coerceAtLeast(0))
-            edit.loopMs = minOf(Playback.MAX_LOOP_MS, total - edit.startMs - Playback.FADE_MS)
-                .coerceAtLeast(Playback.MIN_LOOP_MS)
+            val (start, length) = Playback.defaultFragment(total)
+            edit.startMs = start
+            edit.loopMs = length
         }
     }
     // The first fragment starts playing at once; later edits rebuild the preview only

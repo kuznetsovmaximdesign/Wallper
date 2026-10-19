@@ -70,4 +70,30 @@ class EditMemoryTest {
         map["last-speed"] = "not a number"
         assertEquals(Playback.DEFAULT_SPEED, memory.startingSpeed(), 0f)
     }
+
+    @Test
+    fun anUntouchedFragmentIsNotPinned() {
+        memory.remember("a", EditChoice(EditChoice.DEFAULT_FRAGMENT, 0, 2f, Focus(0.2f, 0.5f)))
+        val restored = memory.choiceFor("a")!!
+        assertEquals(EditChoice.DEFAULT_FRAGMENT, restored.startMs)
+        assertEquals(2f, restored.speed!!, 0f)
+        assertEquals(Focus(0.2f, 0.5f), restored.focus)
+    }
+
+    @Test
+    fun recordsFromBeforeLongerLoopsGetTheNewDefaultFragment() {
+        map["edit:a"] = "6000;30000;1.5;0.4;0.5" // v1: fragment saved even if never moved
+        val restored = memory.choiceFor("a")!!
+        assertEquals(EditChoice.DEFAULT_FRAGMENT, restored.startMs)
+        assertEquals(1.5f, restored.speed!!, 0f)
+        assertEquals(Focus(0.4f, 0.5f), restored.focus)
+    }
+
+    @Test
+    fun brokenRecordsAreIgnored() {
+        map["edit:a"] = "garbage"
+        assertNull(memory.choiceFor("a"))
+        map["edit:b"] = "v2;x;1;;0.5;0.5"
+        assertNull(memory.choiceFor("b"))
+    }
 }
