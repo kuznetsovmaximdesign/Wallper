@@ -53,19 +53,22 @@ class AppRobot {
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
         val start = SystemClock.elapsedRealtime()
         val deadline = start + timeoutMs
-        var refreshed = false
+        var lastRefresh = start
         while (SystemClock.elapsedRealtime() < deadline) {
             reportViewIds()
             device.findObject(By.res(tag))?.let { return it }
             dismissSystemDialog()
-            if (!refreshed && SystemClock.elapsedRealtime() - start > REFRESH_AFTER_MS) {
-                refreshed = true
+            // Ids can go missing again after a window change: ask for them anew now and then.
+            if (SystemClock.elapsedRealtime() - lastRefresh > REFRESH_AFTER_MS) {
+                lastRefresh = SystemClock.elapsedRealtime()
                 refreshAccessibility()
             }
             SystemClock.sleep(250)
         }
         val visibleText = device.findObjects(By.textStartsWith("")).mapNotNull { it.text }.take(12)
-        fail("No element '$tag' on screen (in front: ${device.currentPackageName}, text: $visibleText)")
+        // Tells "the element is not there" from "the app's ids are not reported at all".
+        val ids = device.findObjects(By.pkg(packageName)).mapNotNull { runCatching { it.resourceName }.getOrNull() }.distinct().take(12)
+        fail("No element '$tag' on screen (in front: ${device.currentPackageName}, text: $visibleText, ids: $ids)")
         error("unreachable")
     }
 
