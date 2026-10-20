@@ -53,14 +53,14 @@ class AppRobot {
     fun find(tag: String, timeoutMs: Long = UI_TIMEOUT_MS): UiObject2 {
         val start = SystemClock.elapsedRealtime()
         val deadline = start + timeoutMs
-        var lastRefresh = start
+        var refreshed = false
         while (SystemClock.elapsedRealtime() < deadline) {
             reportViewIds()
             device.findObject(By.res(tag))?.let { return it }
             dismissSystemDialog()
-            // Ids can go missing again after a window change: ask for them anew now and then.
-            if (SystemClock.elapsedRealtime() - lastRefresh > REFRESH_AFTER_MS) {
-                lastRefresh = SystemClock.elapsedRealtime()
+            // Once only: re-registering the service makes a busy emulator slower still.
+            if (!refreshed && SystemClock.elapsedRealtime() - start > REFRESH_AFTER_MS) {
+                refreshed = true
                 refreshAccessibility()
             }
             SystemClock.sleep(250)
@@ -250,7 +250,8 @@ class AppRobot {
 
     fun openFootage(id: String) {
         fresh({ scrollTo(TestTags.card(id)) }) { it.click() }
-        find(TestTags.VIEWER)
+        // A first open on a busy emulator (previews still being cut) can take a while.
+        find(TestTags.VIEWER, LAUNCH_TIMEOUT_MS)
         SystemClock.sleep(SETTLE_MS)
     }
 
