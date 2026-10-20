@@ -3,21 +3,53 @@ name: Android
 on:
   push:
     paths-ignore:
-      - scripts/**
+      - scripts/probe_*
       - .github/workflows/probe-*.yml
       - README.md
+      - docs/**
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: android-${{ github.ref }}
-  # Emulator runs take a while: queue new pushes instead of cancelling them.
-  cancel-in-progress: false
+  # A newer push supersedes the run in progress: only the latest commit is worth testing.
+  cancel-in-progress: true
 
 jobs:
+  # Emulator jobs are the slow, costly part: run them only when what they test changed
+  # since the last fully green run (so a cancelled run's changes are never skipped).
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != push ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          base=$(gh api "repos/${{ github.repository }}/actions/workflows/android.yml/runs?branch=${{ github.ref_name }}&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "No green run to compare with: test everything"
+            echo app=true >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Changed since the last green run ($base):"
+          git diff --name-only "$base" "${{ github.sha }}" | tee changed.txt
+          if grep -qE '^(app/src/(main|androidTest)/|app/(build\.gradle\.kts|proguard-rules\.pro)|gradle/|build\.gradle\.kts|settings\.gradle\.kts|gradle\.properties|scripts/(make-test-videos|test-summary)|scripts/footage/|\.github/workflows/android\.yml)' changed.txt; then
+            echo app=true >> "$GITHUB_OUTPUT"
+          else
+            echo "Nothing the emulator tests cover changed: skipping them"
+            echo app=false >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     steps:
@@ -67,7 +99,8 @@ jobs:
   # The exact APK people install (R8-shrunk release), launched on an emulator:
   # it must open, show the gallery and keep running. Fast, so it reports first.
   release-smoke:
-    needs: build
+    needs: [build, changes]
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     timeout-minutes: 25
     steps:
@@ -186,6 +219,8 @@ jobs:
   # Every user-facing action, run on an emulator against generated test videos.
   # Screenshots decide: after each action the wallpaper must still be visible and moving.
   ui-tests:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     runs-on: ubuntu-24.04 # pinned: the emulator setup is proven here
     timeout-minutes: 75
     strategy:
