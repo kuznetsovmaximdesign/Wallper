@@ -1,7 +1,12 @@
 """Разбор HTML выдачи Авито.
 
-Разметка Авито меняется, поэтому опора — устойчивые вещи: data-marker="item",
-ссылки на профиль /brands/… и /user/…, текст «4,9 · 74 отзыва».
+CSS-классы у Авито хешированные и меняются, поэтому опора — data-marker и href
+(разметка сверена с живой выдачей 27.10.2026):
+
+    item[data-item-id] → item-title, item-price-value, item-link (имя + /brands/<slug>),
+                         seller-rating/score, seller-info/summary («74 отзыва Реквизиты проверены»)
+
+Если маркеров нет — запасной разбор по тексту «4,9 · 74 отзыва».
 """
 
 import re
@@ -36,8 +41,19 @@ def rating_and_reviews(text: str) -> tuple[float | None, int | None]:
     )
 
 
+_BADGES = ("Реквизиты проверены", "Документы проверены", "Надёжный исполнитель")
+
+
+def badges(text: str) -> str | None:
+    found = [b for b in _BADGES if b.lower() in text.lower()]
+    return ", ".join(found) or None
+
+
 def _seller_link(card: Tag) -> Tag | None:
     """Ссылка на профиль; у аватарки текста нет, поэтому предпочитаем ссылку с именем."""
+    marked = card.select_one('a[data-marker="item-link"][href]')
+    if marked is not None and profile_key(marked["href"]):
+        return marked
     links = [a for a in card.find_all("a", href=True) if profile_key(a["href"])]
     named = [a for a in links if a.get_text(strip=True)]
     return (named or links or [None])[0]
@@ -68,14 +84,19 @@ def parse_search(html: str) -> list[Listing]:
         title = (title_a.get("title") or title_a.get_text(" ")).strip()
 
         price_meta = card.select_one('meta[itemprop="price"]')
-        price_el = card.select_one('[data-marker="item-price"]')
+        price_el = card.select_one('[data-marker="item-price-value"], [data-marker="item-price"]')
         price = price_meta["content"] if price_meta and price_meta.get("content") else (
             price_el.get_text(" ").strip() if price_el else None
         )
 
         link = _seller_link(card)
-        block = _seller_block(card, link)
-        rating, reviews = rating_and_reviews(block.get_text(" "))
+        score = card.select_one('[data-marker="seller-rating/score"]')
+        summary = card.select_one('[data-marker="seller-info/summary"]')
+        if summary is not None:
+            text = (score.get_text(" ") + " · " if score else "") + summary.get_text(" ")
+        else:
+            text = _seller_block(card, link).get_text(" ")
+        rating, reviews = rating_and_reviews(text)
         name = None
         if link is not None:
             name = (link.get_text(" ").strip() or None)
@@ -93,6 +114,7 @@ def parse_search(html: str) -> list[Listing]:
                 seller_url=profile_url(key),
                 rating=rating,
                 reviews=reviews,
+                badges=badges(text),
             )
         )
     return out

@@ -11,14 +11,15 @@ def save_listings(conn: sqlite3.Connection, topic_id: int, query: str | None, li
     new_sellers = 0
     for it in listings:
         conn.execute(
-            """INSERT INTO sellers (key, name, url, rating, reviews) VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO sellers (key, name, url, rating, reviews, badges) VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(key) DO UPDATE SET
                    name = coalesce(excluded.name, name),
                    url = coalesce(excluded.url, url),
                    rating = coalesce(excluded.rating, rating),
                    reviews = coalesce(excluded.reviews, reviews),
+                   badges = coalesce(excluded.badges, badges),
                    updated_at = datetime('now')""",
-            (it.seller_key, it.seller_name, it.seller_url, it.rating, it.reviews),
+            (it.seller_key, it.seller_name, it.seller_url, it.rating, it.reviews, it.badges),
         )
         conn.execute(
             """INSERT INTO listings (item_id, seller_key, title, url, price) VALUES (?, ?, ?, ?, ?)
@@ -57,7 +58,7 @@ def executors(conn: sqlite3.Connection, topic_id: int, *, all_statuses: bool = F
     if not all_statuses:
         where.append("ts.status != 'rejected'")
     rows = conn.execute(
-        f"""SELECT s.key, s.name, s.url, s.rating, s.reviews, ts.status, ts.note, ts.first_seen,
+        f"""SELECT s.key, s.name, s.url, s.rating, s.reviews, s.badges, ts.status, ts.note, ts.first_seen,
                    (SELECT group_concat(t.topic_id) FROM topic_sellers t
                      WHERE t.seller_key = s.key AND t.topic_id != ts.topic_id) AS other_topics
             FROM topic_sellers ts JOIN sellers s ON s.key = ts.seller_key

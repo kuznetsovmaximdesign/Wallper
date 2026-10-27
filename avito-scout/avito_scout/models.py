@@ -14,3 +14,4 @@ class Listing:
     seller_url: str | None
     rating: float | None
     reviews: int | None
+    badges: str | None = None  # «Реквизиты проверены, Надёжный исполнитель»

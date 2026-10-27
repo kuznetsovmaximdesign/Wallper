@@ -51,6 +51,7 @@
   {% for r in rows %}
   <tr id="s-{{ r.key }}" class="st-{{ r.status }}">
     <td data-label="Исполнитель">{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.name or 'без имени' }}</a>{% else %}{{ r.name or 'без имени' }}{% endif %}
+      {% if r.badges %}<br><small class="muted">{{ r.badges }}</small>{% endif %}
       {% if r.other_topics %}<span class="tag">есть в других темах</span>{% endif %}</td>
     <td data-label="Рейтинг">{{ ('%.1f' % r.rating).replace('.', ',') if r.rating is not none else '—' }}</td>
     <td data-label="Отзывов">{{ r.reviews if r.reviews is not none else '—' }}</td>

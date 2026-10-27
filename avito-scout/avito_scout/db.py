@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS sellers (
     url TEXT,
     rating REAL,
     reviews INTEGER,
+    badges TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS listings (
