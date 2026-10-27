@@ -27,10 +27,10 @@ def topic(conn, **kw) -> int:
 def test_dedup_and_criteria(conn):
     tid = topic(conn)
     items = parser.parse_search(HTML)
-    assert save_listings(conn, tid, "септик", items) == 3  # 4 объявления, 3 учётки
+    assert save_listings(conn, tid, "септик", items) == 6  # 7 объявлений, 6 учёток
     assert save_listings(conn, tid, "септик", items) == 0  # повторный поиск — новых нет
     rows = executors(conn, tid)
-    assert len(rows) == 3
+    assert len(rows) == 6
     bas = next(r for r in rows if r["key"] == "brands:bas500")
     assert len(bas["listings"]) == 2
 
@@ -44,8 +44,8 @@ def test_rejected_hidden_and_other_topics(conn):
     save_listings(conn, t1, None, items)
     save_listings(conn, t2, None, items[:1])
     conn.execute("UPDATE topic_sellers SET status = 'rejected' WHERE topic_id = ? AND seller_key LIKE 'user:%'", (t1,))
-    assert len(executors(conn, t1)) == 2
-    assert len(executors(conn, t1, all_statuses=True)) == 3
+    assert len(executors(conn, t1)) == 5
+    assert len(executors(conn, t1, all_statuses=True)) == 6
     assert next(r for r in executors(conn, t2))["other_topics"] == str(t1)
 
 
@@ -62,7 +62,7 @@ def test_run_stops_on_block(conn):
     r = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     # Первая страница короче 20 объявлений → следующий запрос, на нём блок → стоп.
     assert len(opened) == 2 and "istra" in opened[0]
-    assert (r["status"], r["pages"], r["listings"], r["new_sellers"]) == ("blocked", 2, 4, 3)
+    assert (r["status"], r["pages"], r["listings"], r["new_sellers"]) == ("blocked", 2, 7, 6)
 
 
 def test_browser_env_drops_proxy(monkeypatch):

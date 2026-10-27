@@ -27,12 +27,20 @@ def _int(s: str) -> int:
 
 
 def rating_and_reviews(text: str) -> tuple[float | None, int | None]:
-    text = text.replace(" ", " ")
+    """Рейтинг и число отзывов из текста блока продавца.
+
+    Без отзывов Авито пишет «Нет отзывов» или вместо них «58 завершённых объявлений» —
+    это 0 отзывов. Рейтинг ищется только рядом с отзывами, чтобы не принять за него
+    «4,5 м» из заголовка.
+    """
+    text = text.replace("\u00a0", " ")
     m = _RATING_REVIEWS.search(text)
     if m:
         return float(m.group(1).replace(",", ".")), _int(m.group(2))
     if _NO_REVIEWS.search(text):
         return None, 0
+    if "отзыв" not in text.lower():
+        return None, (0 if re.search(r"заверш[её]нн", text, re.I) else None)
     reviews = _REVIEWS_ONLY.search(text)
     rating = _RATING_ONLY.search(text)
     return (
@@ -59,16 +67,20 @@ def _seller_link(card: Tag) -> Tag | None:
     return (named or links or [None])[0]
 
 
-def _seller_block(card: Tag, link: Tag | None) -> Tag:
-    """Блок продавца в карточке: от ссылки на профиль вверх, пока в нём нет отзывов."""
+def _seller_block(card: Tag, link: Tag | None) -> Tag | None:
+    """Блок продавца в карточке: контейнер sellerInfo-…, иначе подъём от ссылки на профиль,
+    пока в блоке не появятся отзывы. Без ссылки и контейнера — None (не гадаем по всей карточке)."""
+    info = card.select_one('[class*="sellerInfo"]')
+    if info is not None:
+        return info
     if link is None:
-        return card
+        return None
     node: Tag = link
     while node is not card and node.parent is not None:
-        if "отзыв" in node.get_text(" ") or "нет отзывов" in node.get_text(" ").lower():
+        if "отзыв" in node.get_text(" ").lower():
             return node
         node = node.parent
-    return card
+    return link.parent
 
 
 def parse_search(html: str) -> list[Listing]:
@@ -95,14 +107,16 @@ def parse_search(html: str) -> list[Listing]:
         if summary is not None:
             text = (score.get_text(" ") + " · " if score else "") + summary.get_text(" ")
         else:
-            text = _seller_block(card, link).get_text(" ")
+            block = _seller_block(card, link)
+            text = block.get_text(" ") if block is not None else ""
         rating, reviews = rating_and_reviews(text)
         name = None
         if link is not None:
             name = (link.get_text(" ").strip() or None)
         key = profile_key(link["href"]) if link is not None else None
         if key is None:
-            key = fallback_key(name, rating, reviews)
+            # Без имени склеивать нечего: такая карточка — отдельный исполнитель.
+            key = fallback_key(name, rating, reviews) if name else f"item:{item_id}"
         out.append(
             Listing(
                 item_id=str(item_id),

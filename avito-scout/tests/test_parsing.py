@@ -36,12 +36,14 @@ def test_rating_and_reviews_variants():
     assert parser.rating_and_reviews("4,9 · 1 204 отзыва") == (4.9, 1204)
     assert parser.rating_and_reviews("Иван Нет отзывов") == (None, 0)
     assert parser.rating_and_reviews("Компания") == (None, None)
+    assert parser.rating_and_reviews("Рустал Нет завершённых объявлений") == (None, 0)
+    assert parser.rating_and_reviews("Септик 4,5 м · 58 завершённых объявлений") == (None, 0)
 
 
 def test_parse_search():
     items = parser.parse_search(HTML)
-    assert [i.item_id for i in items] == ["1001", "1002", "1003", "1004"]
-    a, b, c, d = items
+    assert [i.item_id for i in items] == ["1001", "1002", "1003", "1004", "1005", "1006", "1007"]
+    a, b, c, d, e, f, g = items
     assert a.seller_key == b.seller_key == "brands:bas500"
     assert (a.seller_name, a.rating, a.reviews, a.price) == ("BAS", 4.9, 74, "45 000 ₽")
     assert a.badges == "Реквизиты проверены" and b.badges is None
@@ -49,7 +51,12 @@ def test_parse_search():
     assert a.title == "Монтаж септика под ключ"
     assert b.price == "от 30 000 ₽"
     assert (c.seller_key, c.seller_name, c.reviews) == ("user:397e08b939e5", "Иван", 0)
-    assert d.seller_key.startswith("name:") and (d.rating, d.reviews) == (4.6, 12)
+    # Нет ни ссылки на профиль, ни блока продавца — отдельная строка, рейтинг не угадываем.
+    assert (d.seller_key, d.rating, d.reviews) == ("item:1004", None, None)
+    assert (e.seller_key, e.seller_name, e.rating, e.reviews, e.badges) == (
+        "brands:i304651403", "Септик для дома и дачи", None, 0, "Реквизиты проверены")
+    assert (f.seller_key, f.rating, f.reviews) == ("item:1006", None, None)  # «4,8 км» не рейтинг
+    assert g.seller_key == "item:1007"
     assert parser.total_count(HTML) == 867
 
 
