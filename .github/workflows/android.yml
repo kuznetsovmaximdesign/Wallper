@@ -7,6 +7,7 @@ on:
       - .github/workflows/probe-*.yml
       - README.md
       - docs/**
+      - avito-scout/**
   pull_request:
   workflow_dispatch:
 
