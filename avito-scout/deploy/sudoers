@@ -1,0 +1,2 @@
+# /etc/sudoers.d/avito-scout — только перезапуск своей службы.
+avito ALL=(root) NOPASSWD: /usr/bin/systemctl restart avito-scout

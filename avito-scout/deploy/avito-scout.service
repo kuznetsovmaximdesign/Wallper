@@ -1,0 +1,21 @@
+[Unit]
+Description=Avito Scout (веб + робот-браузер)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=avito
+WorkingDirectory=/opt/avito-scout/repo/avito-scout
+Environment=AVITO_SCOUT_DATA=/opt/avito-scout/var
+Environment=AVITO_SCOUT_HOST=127.0.0.1
+Environment=AVITO_SCOUT_PORT=8793
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/avito-scout/ms-playwright
+# Пароль на веб-интерфейс, регион и т. п.: AVITO_SCOUT_PASSWORD=…, AVITO_SCOUT_REGION=…
+EnvironmentFile=-/opt/avito-scout/avito-scout.env
+# Браузер работает с окном в виртуальном экране — так Авито пропускает его как обычный.
+ExecStart=/usr/bin/xvfb-run -a -s "-screen 0 1366x768x24" /opt/avito-scout/.venv/bin/python -m avito_scout
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

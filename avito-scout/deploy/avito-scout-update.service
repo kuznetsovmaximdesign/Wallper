@@ -1,0 +1,7 @@
+[Unit]
+Description=Avito Scout: обновление из GitHub
+
+[Service]
+Type=oneshot
+User=avito
+ExecStart=/opt/avito-scout/repo/avito-scout/deploy/update.sh
