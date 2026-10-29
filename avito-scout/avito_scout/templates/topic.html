@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ topic.name }} — Avito Scout{% endblock %}
+{% block head %}{% if running %}<meta http-equiv="refresh" content="15">{% endif %}{% endblock %}
+{% block main %}
+<h1>{{ topic.name }}</h1>
+
+<details class="card" {% if not sources and not queries %}open{% endif %}>
+  <summary>Настройки поиска</summary>
+  <form method="post" action="/topics/{{ topic.id }}/settings">
+    <label>Название <input name="name" value="{{ topic.name }}" required></label>
+    <label>Что нужно сделать <textarea name="description" rows="3">{{ topic.description }}</textarea></label>
+    <label>Ссылки поиска Авито — по одной на строку
+      <textarea name="sources" rows="3" placeholder="https://www.avito.ru/moskva/predlozheniya_uslug?…">{{ sources|join('\n') }}</textarea>
+      <small class="muted">Локацию и радиус задайте на Авито и вставьте ссылку. Пусто — весь регион «{{ region }}».</small>
+    </label>
+    <label>Запросы — по одному на строку
+      <textarea name="queries" rows="4" placeholder="монтаж септика">{{ queries|join('\n') }}</textarea>
+      <small class="muted">Пусто — поиск по названию темы (или по запросу внутри ссылки).</small>
+    </label>
+    <div class="row">
+      <label>Рейтинг от <input name="min_rating" inputmode="decimal" value="{{ topic.min_rating if topic.min_rating is not none else '' }}" placeholder="4,7"></label>
+      <label>Отзывов от <input name="min_reviews" inputmode="numeric" value="{{ topic.min_reviews if topic.min_reviews is not none else '' }}" placeholder="20"></label>
+    </div>
+    <button>Сохранить</button>
+  </form>
+</details>
+
+<div class="actions">
+  <form method="post" action="/topics/{{ topic.id }}/run">
+    <button {% if running %}disabled{% endif %}>{% if running %}Идёт поиск…{% else %}Искать{% endif %}</button>
+  </form>
+  <a class="button secondary" href="/topics/{{ topic.id }}/export.csv">Excel (CSV)</a>
+  {% if show_all %}<a href="/topics/{{ topic.id }}">Скрыть «не подходит»</a>
+  {% else %}<a href="/topics/{{ topic.id }}?all=1">Показать «не подходит»</a>{% endif %}
+</div>
+
+{% if runs %}
+<ul class="runs muted">
+  {% for r in runs %}
+  <li class="run-{{ r.status }}">{{ r.started_at }} — {{ {'running':'идёт','done':'готово','blocked':'Авито ограничил доступ','error':'ошибка'}[r.status] }}:
+    страниц {{ r.pages }}, объявлений {{ r.listings }}, новых исполнителей {{ r.new_sellers }}
+    {% if r.message %}<br><span class="err">{{ r.message }}</span>{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Исполнители <span class="muted">{{ rows|length }}</span></h2>
+{% if rows %}
+<table class="sellers">
+  <thead><tr><th>Исполнитель</th><th>Рейтинг</th><th>Отзывов</th><th>Объявления</th><th>Статус</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr id="s-{{ r.key }}" class="st-{{ r.status }}">
+    <td data-label="Исполнитель">{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.name or 'без имени' }}</a>{% else %}{{ r.name or 'без имени' }}{% endif %}
+      {% if r.badges %}<br><small class="muted">{{ r.badges }}</small>{% endif %}
+      {% if r.other_topics %}<span class="tag">есть в других темах</span>{% endif %}</td>
+    <td data-label="Рейтинг">{{ ('%.1f' % r.rating).replace('.', ',') if r.rating is not none else '—' }}</td>
+    <td data-label="Отзывов">{{ r.reviews if r.reviews is not none else '—' }}</td>
+    <td data-label="Объявления">
+      <details><summary>{{ r.listings|length }}</summary>
+        <ul>{% for i in r.listings %}<li><a href="{{ i.url }}" target="_blank" rel="noopener">{{ i.title }}</a>{% if i.price %} · {{ i.price }}{% endif %}</li>{% endfor %}</ul>
+      </details></td>
+    <td data-label="Статус">
+      <form method="post" action="/topics/{{ topic.id }}/sellers/status" class="status">
+        <input type="hidden" name="key" value="{{ r.key }}">
+        {% for code, label in STATUSES.items() %}
+        <button name="status" value="{{ code }}" class="chip {% if r.status == code %}on{% endif %}">{{ label }}</button>
+        {% endfor %}
+      </form></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">Пока никого. Заполните настройки и нажмите «Искать».</p>
+{% endif %}
+{% endblock %}
