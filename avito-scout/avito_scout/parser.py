@@ -57,6 +57,16 @@ def badges(text: str) -> str | None:
     return ", ".join(found) or None
 
 
+_NAME_TAIL = re.compile(r"\s+[1-5][.,]\d(?:\s+[1-5][.,]\d)?(?:\s*·?\s*[\d\s]+отзыв\w*)?\s*$")
+
+
+def seller_name(text: str) -> str | None:
+    """Имя из ссылки на продавца: в живой разметке рядом с ним внутри ссылки лежат
+    рейтинг и отзывы («Александр 5,0 5,0 · 151 отзыв») — их отрезаем."""
+    text = re.sub(r"\s+", " ", text.replace("\u00a0", " ")).strip()
+    return _NAME_TAIL.sub("", text).strip() or None
+
+
 def _seller_link(card: Tag) -> Tag | None:
     """Ссылка на профиль; у аватарки текста нет, поэтому предпочитаем ссылку с именем."""
     marked = card.select_one('a[data-marker="item-link"][href]')
@@ -112,7 +122,7 @@ def parse_search(html: str) -> list[Listing]:
         rating, reviews = rating_and_reviews(text)
         name = None
         if link is not None:
-            name = (link.get_text(" ").strip() or None)
+            name = seller_name(link.get_text(" "))
         key = profile_key(link["href"]) if link is not None else None
         if key is None:
             # Без имени склеивать нечего: такая карточка — отдельный исполнитель.

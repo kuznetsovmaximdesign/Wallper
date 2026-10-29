@@ -60,6 +60,16 @@ def test_parse_search():
     assert parser.total_count(HTML) == 867
 
 
+def test_seller_name_drops_rating_tail():
+    # Строки из живой выдачи 27.10.2026.
+    assert parser.seller_name("Александр 5,0 5,0 · 151 отзыв") == "Александр"
+    assert parser.seller_name("ПРОСТО СЕПТИК 5,0 5,0 · 3 отзыва") == "ПРОСТО СЕПТИК"
+    assert parser.seller_name("Септик Канализация 4,7 4,7 · 315 отзывов") == "Септик Канализация"
+    assert parser.seller_name("  АИС - Бурение скважин ") == "АИС - Бурение скважин"
+    assert parser.seller_name("Септик 2,5 м³") == "Септик 2,5 м³"
+    assert parser.seller_name("") is None
+
+
 def test_is_blocked():
     assert parser.is_blocked(429, "")
     assert parser.is_blocked(200, "<h2>Доступ ограничен: проблема с IP</h2>")
