@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from . import config, db, runner
 from .collect import executors
 from .export import to_csv
+from .search_urls import is_avito
 
 _HERE = Path(__file__).parent
 STATUSES = {"new": "Новый", "favorite": "Избранное", "rejected": "Не подходит"}
@@ -93,6 +94,9 @@ def create_app(cfg: config.Config | None = None, conn: sqlite3.Connection | None
                       min_rating: str = Form(""), min_reviews: str = Form(""),
                       sources: str = Form(""), queries: str = Form("")):
         topic_or_404(topic_id)
+        bad = [u for u in _lines(sources) if not is_avito(u)]
+        if bad:
+            raise HTTPException(400, "Нужны ссылки на avito.ru, не подходит: " + ", ".join(bad))
         conn.execute("UPDATE topics SET name = ?, description = ?, min_rating = ?, min_reviews = ? WHERE id = ?",
                      (name.strip(), description.strip(), _num(min_rating, float), _num(min_reviews, int), topic_id))
         conn.execute("DELETE FROM topic_sources WHERE topic_id = ?", (topic_id,))

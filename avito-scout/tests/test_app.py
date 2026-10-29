@@ -101,6 +101,9 @@ def test_web_flow(tmp_path):
     assert 'value="4.5"' in r.text
     assert c.get(f"/topics/{tid}/export.csv").text.startswith("﻿Исполнитель;")
     assert c.get("/topics/999").status_code == 404
+    r = c.post(f"/topics/{tid}/settings", data={"name": "Забор", "sources": "http://192.168.3.1/"})
+    assert r.status_code == 400
+    assert "radius=30" in c.get(f"/topics/{tid}").text
 
 
 def test_password(tmp_path):

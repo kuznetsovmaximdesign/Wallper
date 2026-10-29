@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from avito_scout import parser
-from avito_scout.search_urls import page_url
+import pytest
+
+from avito_scout.search_urls import is_avito, page_url
 from avito_scout.sellers import fallback_key, profile_key, profile_url
 
 HTML = (Path(__file__).parent / "fixtures" / "search.html").read_text()
@@ -75,3 +77,19 @@ def test_is_blocked():
     assert parser.is_blocked(429, "")
     assert parser.is_blocked(200, "<h2>Доступ ограничен: проблема с IP</h2>")
     assert not parser.is_blocked(439, HTML)  # мягкая метка: выдача пришла целиком
+
+
+@pytest.mark.parametrize("url", [
+    "http://192.168.3.1/", "http://127.0.0.1:8123", "file:///etc/passwd", "https://avito.ru.evil.com/x",
+    "https://evil.com/?u=www.avito.ru", "javascript:alert(1)", "//192.168.3.1/", "https://user@192.168.3.1/",
+])
+def test_only_avito_links(url):
+    assert not is_avito(url)
+    with pytest.raises(ValueError):
+        page_url(url, "забор")
+
+
+def test_avito_links_allowed():
+    assert is_avito("https://www.avito.ru/moskva/predlozheniya_uslug")
+    assert is_avito("https://m.avito.ru/x") and is_avito("https://avito.ru/x")
+    assert page_url("http://www.avito.ru/x", None).startswith("https://www.avito.ru/")
