@@ -10,6 +10,7 @@ def save_listings(conn: sqlite3.Connection, topic_id: int, query: str | None, li
     """Сохраняет объявления; возвращает, сколько учёток впервые появилось в теме."""
     new_sellers = 0
     for it in listings:
+        badges = _merge_badges(conn, it.seller_key, it.badges)
         conn.execute(
             """INSERT INTO sellers (key, name, url, rating, reviews, badges) VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(key) DO UPDATE SET
@@ -17,9 +18,9 @@ def save_listings(conn: sqlite3.Connection, topic_id: int, query: str | None, li
                    url = coalesce(excluded.url, url),
                    rating = coalesce(excluded.rating, rating),
                    reviews = coalesce(excluded.reviews, reviews),
-                   badges = coalesce(excluded.badges, badges),
+                   badges = excluded.badges,
                    updated_at = datetime('now')""",
-            (it.seller_key, it.seller_name, it.seller_url, it.rating, it.reviews, it.badges),
+            (it.seller_key, it.seller_name, it.seller_url, it.rating, it.reviews, badges),
         )
         conn.execute(
             """INSERT INTO listings (item_id, seller_key, title, url, price) VALUES (?, ?, ?, ?, ?)
@@ -38,6 +39,17 @@ def save_listings(conn: sqlite3.Connection, topic_id: int, query: str | None, li
         )
         new_sellers += cur.rowcount
     return new_sellers
+
+
+def _merge_badges(conn: sqlite3.Connection, key: str, new: str | None) -> str | None:
+    """Проверки продавца копятся: разные объявления показывают разные бейджи."""
+    row = conn.execute("SELECT badges FROM sellers WHERE key = ?", (key,)).fetchone()
+    seen: dict[str, None] = {}
+    for part in ((row["badges"] if row else None) or "", new or ""):
+        for b in part.split(", "):
+            if b:
+                seen.setdefault(b, None)
+    return ", ".join(seen) or None
 
 
 def executors(conn: sqlite3.Connection, topic_id: int, *, all_statuses: bool = False) -> list[dict]:

@@ -33,6 +33,7 @@ def test_dedup_and_criteria(conn):
     assert len(rows) == 6
     bas = next(r for r in rows if r["key"] == "brands:bas500")
     assert len(bas["listings"]) == 2
+    assert bas["badges"] == "Реквизиты проверены, Надёжный исполнитель"
 
     conn.execute("UPDATE topics SET min_rating = 4.7, min_reviews = 20 WHERE id = ?", (tid,))
     assert [r["key"] for r in executors(conn, tid)] == ["brands:bas500"]
