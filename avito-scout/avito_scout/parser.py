@@ -138,7 +138,8 @@ def parse_search(html: str) -> list[Listing]:
                 seller_url=profile_url(key),
                 rating=rating,
                 reviews=reviews,
-                badges=badges(text),
+                # Бейджи в живой выдаче лежат рядом с отзывами, а не внутри seller-info/summary.
+                badges=badges(" ".join([text] + [b.get_text(" ") for b in card.select('[data-marker^="badge-title"]')])),
             )
         )
     return out

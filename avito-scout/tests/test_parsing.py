@@ -46,7 +46,8 @@ def test_parse_search():
     a, b, c, d, e, f, g = items
     assert a.seller_key == b.seller_key == "brands:bas500"
     assert (a.seller_name, a.rating, a.reviews, a.price) == ("BAS", 4.9, 74, "45 000 ₽")
-    assert a.badges == "Реквизиты проверены" and b.badges is None
+    assert a.badges == "Реквизиты проверены"
+    assert (b.seller_name, b.rating, b.reviews, b.badges) == ("BAS", 4.9, 74, "Надёжный исполнитель")
     assert a.url == "https://www.avito.ru/moskva/predlozheniya_uslug/montazh_septika_1001"
     assert a.title == "Монтаж септика под ключ"
     assert b.price == "от 30 000 ₽"
