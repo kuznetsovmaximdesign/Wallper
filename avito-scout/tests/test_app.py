@@ -66,6 +66,15 @@ def test_run_stops_on_block(conn):
     assert (r["status"], r["pages"], r["listings"], r["new_sellers"]) == ("blocked", 2, 7, 6)
 
 
+def test_plan_never_scans_whole_category(conn):
+    tid = topic(conn)
+    assert runner.plan(conn, tid, "istra") == [("https://www.avito.ru/istra/predlozheniya_uslug", "Септик")]
+    conn.execute("INSERT INTO topic_sources (topic_id, url) VALUES (?, 'https://www.avito.ru/istra/predlozheniya_uslug?q=septik&radius=30')", (tid,))
+    assert runner.plan(conn, tid, "istra") == [("https://www.avito.ru/istra/predlozheniya_uslug?q=septik&radius=30", None)]
+    conn.execute("INSERT INTO topic_sources (topic_id, url) VALUES (?, 'https://www.avito.ru/istra/predlozheniya_uslug?radius=30')", (tid,))
+    assert [q for _, q in runner.plan(conn, tid, "istra")] == ["Септик", "Септик"]
+
+
 def test_browser_env_drops_proxy(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1081")
     monkeypatch.setenv("all_proxy", "socks5://x")

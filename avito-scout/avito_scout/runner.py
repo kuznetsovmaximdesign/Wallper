@@ -24,11 +24,14 @@ def plan(conn: sqlite3.Connection, topic_id: int, region: str) -> list[tuple[str
     bases = [r["url"] for r in conn.execute("SELECT url FROM topic_sources WHERE topic_id = ?", (topic_id,))]
     queries = [r["text"] for r in conn.execute(
         "SELECT text FROM topic_queries WHERE topic_id = ? AND enabled = 1 ORDER BY id", (topic_id,))]
-    bases = bases or [default_base(region)]
-    if not queries:
-        # Только ссылки — значит, запрос уже внутри ссылки.
+    if not queries and bases and all("q=" in b for b in bases):
+        # Только ссылки с запросом внутри — ищем по ним как есть.
         return [(b, None) for b in bases]
-    return [(b, q) for b in bases for q in queries]
+    if not queries:
+        # Без запросов не прочёсываем весь раздел услуг — ищем по названию темы.
+        name = conn.execute("SELECT name FROM topics WHERE id = ?", (topic_id,)).fetchone()["name"]
+        queries = [name]
+    return [(b, q) for b in (bases or [default_base(region)]) for q in queries]
 
 
 def run(conn: sqlite3.Connection, topic_id: int, open_page: Callable[[str], "Page"], *,

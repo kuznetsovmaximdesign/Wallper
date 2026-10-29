@@ -15,6 +15,7 @@
     </label>
     <label>Запросы — по одному на строку
       <textarea name="queries" rows="4" placeholder="монтаж септика">{{ queries|join('\n') }}</textarea>
+      <small class="muted">Пусто — поиск по названию темы (или по запросу внутри ссылки).</small>
     </label>
     <div class="row">
       <label>Рейтинг от <input name="min_rating" inputmode="decimal" value="{{ topic.min_rating if topic.min_rating is not none else '' }}" placeholder="4,7"></label>
